@@ -7,17 +7,21 @@ class User(db.Model):
     name = db.Column(db.String(255), nullable=False)
     dob = db.Column(db.Date, nullable=False)
     gender = db.Column(db.String(50), nullable=True)
-    occupation = db.Column(db.String(255), nullable=True)  # Can include "student" as a value
-    marital_status = db.Column(db.Boolean, nullable=True)
+    occupation = db.Column(db.String(255), nullable=True)
+    marital_status = db.Column(db.String(50), nullable=True)
     city = db.Column(db.String(100), nullable=True)
-    residence_type = db.Column(db.Boolean, nullable=True)  # 'rural' or 'urban'
+    residence_type = db.Column(db.String(20), nullable=True)  # 'rural' or 'urban'
     category = db.Column(db.String(50), nullable=True)  # 'general', 'OBC', etc.
     differently_abled = db.Column(db.Boolean, nullable=True, default=False)
     disability_percentage = db.Column(db.Float, nullable=True)
     minority = db.Column(db.Boolean, nullable=True)
     bpl_category = db.Column(db.Boolean, nullable=True)
     income = db.Column(db.Float, nullable=True)
+    education_level = db.Column(db.String(100), nullable=True)  # Added for faceted search
+    preferred_language = db.Column(db.String(50), nullable=True)  # For multilingual support
+    notification_preferences = db.Column(db.Boolean, default=True)  # For notification system
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_active = db.Column(db.DateTime, nullable=True)  # Track user activity
 
 
 class Scheme(db.Model):
@@ -29,8 +33,8 @@ class Scheme(db.Model):
     expiry_date = db.Column(db.Date, nullable=True)
     age_range = db.Column(db.String(50), nullable=True)
     income = db.Column(db.Float, nullable=True)
-    occupation = db.Column(db.String(100), nullable=True)  # Can include "student" as a value
-    residence_type = db.Column(db.Boolean, nullable=True)  # Changed to match User table: 'rural' or 'urban'
+    occupation = db.Column(db.String(100), nullable=True)
+    residence_type = db.Column(db.String(20), nullable=True)  # 'rural' or 'urban'
     city = db.Column(db.String(100), nullable=True)
     gender = db.Column(db.String(20), nullable=True)
     caste = db.Column(db.String(100), nullable=True)
@@ -38,9 +42,60 @@ class Scheme(db.Model):
     differently_abled = db.Column(db.Boolean, nullable=True)
     marital_status = db.Column(db.String(50), nullable=True)
     disability_percentage = db.Column(db.Float, nullable=True)
-    minority = db.Column(db.Boolean, nullable=True)  # Added to match User table
-    bpl_category = db.Column(db.Boolean, nullable=True)  # Added to match User table
+    minority = db.Column(db.Boolean, nullable=True)
+    bpl_category = db.Column(db.Boolean, nullable=True)
     department = db.Column(db.String(255), nullable=True)
     application_link = db.Column(db.String(500), nullable=True)
     required_documents = db.Column(db.Text, nullable=True)
+    scheme_details = db.Column(db.Text, nullable=True)  # More detailed information
+    keywords = db.Column(db.Text, nullable=True)  # For better NLP matching
+    popularity_score = db.Column(db.Float, default=0.0)  # For relevance ranking
+    local_body = db.Column(db.String(100), nullable=True)  # For filtering by local governing bodies
+    education_criteria = db.Column(db.String(255), nullable=True)  # Specific education requirements
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Optional fields for multilingual support
+    description_marathi = db.Column(db.Text, nullable=True)
+    scheme_details_marathi = db.Column(db.Text, nullable=True)
+
+class UserBookmark(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    scheme_id = db.Column(db.Integer, db.ForeignKey('scheme.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text, nullable=True)  # Optional user notes about the bookmarked scheme
+    
+    # Relationships
+    user = db.relationship('User', backref=db.backref('bookmarks', lazy=True))
+    scheme = db.relationship('Scheme', backref=db.backref('bookmarked_by', lazy=True))
+    
+    # Ensure a user can bookmark a scheme only once
+    __table_args__ = (db.UniqueConstraint('user_id', 'scheme_id', name='unique_user_scheme_bookmark'),)
+
+class SchemeCategory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    
+    # Relationship with schemes (many-to-many)
+    schemes = db.relationship('Scheme', secondary='scheme_category_association', backref='categories')
+
+# Association table for many-to-many relationship between schemes and categories
+scheme_category_association = db.Table('scheme_category_association',
+    db.Column('scheme_id', db.Integer, db.ForeignKey('scheme.id'), primary_key=True),
+    db.Column('category_id', db.Integer, db.ForeignKey('scheme_category.id'), primary_key=True)
+)
+
+class RequiredDocument(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    
+    # Many-to-many relationship with schemes
+    schemes = db.relationship('Scheme', secondary='scheme_document_association', backref='required_document_list')
+
+# Association table for many-to-many relationship between schemes and required documents
+scheme_document_association = db.Table('scheme_document_association',
+    db.Column('scheme_id', db.Integer, db.ForeignKey('scheme.id'), primary_key=True),
+    db.Column('document_id', db.Integer, db.ForeignKey('required_document.id'), primary_key=True)
+)
