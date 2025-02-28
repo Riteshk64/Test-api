@@ -3,7 +3,7 @@ import os
 from flask import Flask 
 
 from .extensions import db
-from .routes import main
+from .routes import api
 
 def create_app():
     app = Flask(__name__)
@@ -13,6 +13,6 @@ def create_app():
 
     db.init_app(app)
 
-    app.register_blueprint(main)
+    app.register_blueprint(api)
 
     return app

@@ -46,7 +46,6 @@ class Scheme(db.Model):
     bpl_category = db.Column(db.Boolean, nullable=True)
     department = db.Column(db.String(255), nullable=True)
     application_link = db.Column(db.String(500), nullable=True)
-    required_documents = db.Column(db.Text, nullable=True)
     scheme_details = db.Column(db.Text, nullable=True)  # More detailed information
     keywords = db.Column(db.Text, nullable=True)  # For better NLP matching
     popularity_score = db.Column(db.Float, default=0.0)  # For relevance ranking
@@ -70,32 +69,4 @@ class UserBookmark(db.Model):
     scheme = db.relationship('Scheme', backref=db.backref('bookmarked_by', lazy=True))
     
     # Ensure a user can bookmark a scheme only once
-    __table_args__ = (db.UniqueConstraint('user_id', 'scheme_id', name='unique_user_scheme_bookmark'),)
-
-class SchemeCategory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    
-    # Relationship with schemes (many-to-many)
-    schemes = db.relationship('Scheme', secondary='scheme_category_association', backref='categories')
-
-# Association table for many-to-many relationship between schemes and categories
-scheme_category_association = db.Table('scheme_category_association',
-    db.Column('scheme_id', db.Integer, db.ForeignKey('scheme.id'), primary_key=True),
-    db.Column('category_id', db.Integer, db.ForeignKey('scheme_category.id'), primary_key=True)
-)
-
-class RequiredDocument(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    
-    # Many-to-many relationship with schemes
-    schemes = db.relationship('Scheme', secondary='scheme_document_association', backref='required_document_list')
-
-# Association table for many-to-many relationship between schemes and required documents
-scheme_document_association = db.Table('scheme_document_association',
-    db.Column('scheme_id', db.Integer, db.ForeignKey('scheme.id'), primary_key=True),
-    db.Column('document_id', db.Integer, db.ForeignKey('required_document.id'), primary_key=True)
-)
+    _table_args_ = (db.UniqueConstraint('user_id', 'scheme_id', name='unique_user_scheme_bookmark'),)
