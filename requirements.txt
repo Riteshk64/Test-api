@@ -11,4 +11,3 @@ SQLAlchemy==1.4.46
 Werkzeug==2.2.2
 firebase_admin
 marshmallow
-functools
