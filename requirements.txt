@@ -12,5 +12,3 @@ Werkzeug==2.2.2
 firebase_admin
 marshmallow
 functools
-base64
-json
