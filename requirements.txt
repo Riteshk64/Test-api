@@ -9,4 +9,8 @@ MarkupSafe==2.1.1
 psycopg2-binary==2.9.5
 SQLAlchemy==1.4.46
 Werkzeug==2.2.2
-flask_jwt_extended
+firebase_admin
+marshmallow
+functools
+base64
+json

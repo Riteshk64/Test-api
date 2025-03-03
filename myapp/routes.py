@@ -5,12 +5,29 @@ import functools
 from firebase_admin import auth, credentials, initialize_app
 from marshmallow import Schema, fields, validate, ValidationError
 import math
+import os
+import json
+import base64
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark
 
-# Initialize Firebase Admin SDK
-cred = credentials.Certificate('path/to/your/firebase-credentials.json')
+# Check if the credentials are provided as base64
+if os.environ.get('FIREBASE_CREDENTIALS_BASE64'):
+    # Decode base64 string to JSON
+    credentials_json = base64.b64decode(os.environ.get('FIREBASE_CREDENTIALS_BASE64')).decode('utf-8')
+    service_account_info = json.loads(credentials_json)
+# If regular JSON string is provided
+elif os.environ.get('FIREBASE_SERVICE_ACCOUNT'):
+    service_account_info = json.loads(os.environ.get('FIREBASE_SERVICE_ACCOUNT'))
+# Fallback to local file if available
+elif os.path.exists('./myyojana-d0da4-firebase-adminsdk-fbsvc-f141e13d00.json'):
+    with open('./myyojana-d0da4-firebase-adminsdk-fbsvc-f141e13d00.json', 'r') as f:
+        service_account_info = json.load(f)
+else:
+    raise Exception("Firebase credentials not found. Please provide FIREBASE_CREDENTIALS_BASE64 or FIREBASE_SERVICE_ACCOUNT environment variable.")
+
+cred = credentials.Certificate(service_account_info)
 firebase_app = initialize_app(cred)
 
 # Create Blueprint
