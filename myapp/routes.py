@@ -1,9 +1,6 @@
-from flask import Blueprint, request, jsonify, redirect, url_for
+from flask import Blueprint, request, jsonify
 from datetime import datetime
-from sqlalchemy import or_, and_
-import functools
-from firebase_admin import auth, credentials, initialize_app
-from marshmallow import Schema, fields, validate, ValidationError
+from sqlalchemy import or_
 import math
 import os
 import json
@@ -11,24 +8,7 @@ import base64
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark
-
-# Check if the credentials are provided as base64
-if os.environ.get('FIREBASE_CREDENTIALS_BASE64'):
-    # Decode base64 string to JSON
-    credentials_json = base64.b64decode(os.environ.get('FIREBASE_CREDENTIALS_BASE64')).decode('utf-8')
-    service_account_info = json.loads(credentials_json)
-# If regular JSON string is provided
-elif os.environ.get('FIREBASE_SERVICE_ACCOUNT'):
-    service_account_info = json.loads(os.environ.get('FIREBASE_SERVICE_ACCOUNT'))
-# Fallback to local file if available
-elif os.path.exists('./myyojana-d0da4-firebase-adminsdk-fbsvc-f141e13d00.json'):
-    with open('./myyojana-d0da4-firebase-adminsdk-fbsvc-f141e13d00.json', 'r') as f:
-        service_account_info = json.load(f)
-else:
-    raise Exception("Firebase credentials not found. Please provide FIREBASE_CREDENTIALS_BASE64 or FIREBASE_SERVICE_ACCOUNT environment variable.")
-
-cred = credentials.Certificate(service_account_info)
-firebase_app = initialize_app(cred)
+from marshmallow import Schema, fields, validate, ValidationError
 
 # Create Blueprint
 api = Blueprint('api', __name__)
@@ -64,32 +44,6 @@ class PaginationParamsSchema(Schema):
     page = fields.Integer(required=False, missing=1, validate=validate.Range(min=1))
     per_page = fields.Integer(required=False, missing=10, validate=validate.Range(min=1, max=100))
 
-# --------------------- Firebase Authentication Decorator ---------------------
-
-def firebase_auth_required(f):
-    @functools.wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Get the auth token from the request header
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({"error": "Invalid authorization header"}), 401
-        
-        id_token = auth_header.split('Bearer ')[1]
-        
-        try:
-            # Verify the token
-            decoded_token = auth.verify_id_token(id_token)
-            # Get Firebase UID
-            firebase_uid = decoded_token['uid']
-            
-            # Make the Firebase UID available to the route function
-            request.firebase_uid = firebase_uid
-            return f(*args, **kwargs)
-        except Exception as e:
-            return jsonify({"error": f"Invalid token: {str(e)}"}), 401
-    
-    return decorated_function
-
 # --------------------- Helper Functions ---------------------
 
 def paginate_results(query, page, per_page):
@@ -108,125 +62,6 @@ def paginate_results(query, page, per_page):
             "has_prev": pagination.has_prev
         }
     }
-
-def extract_keywords_from_query(query):
-    """Enhanced function for keyword extraction from natural language queries"""
-    # Simple implementation - split by spaces and remove common words
-    common_words = {'what', 'which', 'how', 'is', 'are', 'the', 'for', 'in', 'of', 'and', 'to', 'a', 'an', 
-                   'available', 'eligible', 'qualify', 'can', 'get', 'me', 'my', 'i', 'am', 'schemes', 'scheme'}
-    words = query.lower().split()
-    keywords = [word for word in words if word not in common_words and len(word) > 2]
-    
-    # Add specific entity recognition for common categories
-    if any(word in query.lower() for word in ['farmer', 'farming', 'agriculture', 'crop', 'farm']):
-        keywords.append('agriculture')
-    if any(word in query.lower() for word in ['student', 'education', 'study', 'college', 'school', 'university', 'scholarship']):
-        keywords.append('education')
-    if any(word in query.lower() for word in ['women', 'woman', 'female', 'girl', 'mother', 'maternity']):
-        keywords.append('women')
-    if any(word in query.lower() for word in ['disable', 'disability', 'handicap', 'special needs', 'differently abled']):
-        keywords.append('disability')
-    if any(word in query.lower() for word in ['startup', 'business', 'entrepreneur', 'msme', 'enterprise']):
-        keywords.append('business')
-    if any(word in query.lower() for word in ['senior', 'elderly', 'old age', 'retirement', 'pension']):
-        keywords.append('elderly')
-    if any(word in query.lower() for word in ['health', 'medical', 'hospital', 'treatment', 'insurance']):
-        keywords.append('health')
-    if any(word in query.lower() for word in ['house', 'housing', 'home', 'shelter', 'residence']):
-        keywords.append('housing')
-    
-    return keywords
-
-def calculate_match_score(user, scheme):
-    """Calculate how well a scheme matches a user profile"""
-    score = 0
-    total_criteria = 0
-    
-    # Match gender
-    if scheme.gender is not None:
-        total_criteria += 1
-        if user.gender == scheme.gender:
-            score += 1
-    
-    # Match residence type
-    if scheme.residence_type is not None:
-        total_criteria += 1
-        if user.residence_type == scheme.residence_type:
-            score += 1
-    
-    # Match city
-    if scheme.city is not None:
-        total_criteria += 1
-        if user.city == scheme.city:
-            score += 1
-    
-    # Match income
-    if scheme.income is not None and user.income is not None:
-        total_criteria += 1
-        if user.income <= scheme.income:
-            score += 1
-    
-    # Match differently_abled status
-    if scheme.differently_abled is not None:
-        total_criteria += 1
-        if user.differently_abled == scheme.differently_abled:
-            score += 1
-    
-    # Match minority status
-    if scheme.minority is not None:
-        total_criteria += 1
-        if user.minority == scheme.minority:
-            score += 1
-    
-    # Match BPL category
-    if scheme.bpl_category is not None:
-        total_criteria += 1
-        if user.bpl_category == scheme.bpl_category:
-            score += 1
-    
-    # Match occupation
-    if scheme.occupation is not None:
-        total_criteria += 1
-        if user.occupation == scheme.occupation:
-            score += 1
-    
-    # Match marital status
-    if scheme.marital_status is not None:
-        total_criteria += 1
-        if user.marital_status == scheme.marital_status:
-            score += 1
-    
-    # Match caste/category
-    if scheme.caste is not None:
-        total_criteria += 1
-        if user.category == scheme.caste:
-            score += 1
-    
-    # Calculate age if dob is available and scheme has age criteria
-    if user.dob and scheme.age_range:
-        total_criteria += 1
-        try:
-            from datetime import date
-            today = date.today()
-            age = today.year - user.dob.year - ((today.month, today.day) < (user.dob.month, user.dob.day))
-            
-            age_min, age_max = map(int, scheme.age_range.split('-'))
-            if age_min <= age <= age_max:
-                score += 1
-        except (ValueError, AttributeError):
-            # If age range format is incorrect, ignore this criterion
-            total_criteria -= 1
-    
-    # Calculate percentage match
-    match_percentage = (score / total_criteria * 100) if total_criteria > 0 else 0
-    
-    # Return match label based on percentage
-    if match_percentage >= 80:
-        return "High"
-    elif match_percentage >= 50:
-        return "Medium"
-    else:
-        return "Low"
 
 def handle_validation_error(error):
     """Helper function to format validation errors"""
@@ -281,13 +116,8 @@ def create_user():
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 @api.route('/user/<string:firebase_id>', methods=['GET'])
-@firebase_auth_required
 def get_user(firebase_id):
     try:
-        # Verify user can only access their own profile
-        if request.firebase_uid != firebase_id:
-            return jsonify({"error": "Unauthorized access"}), 403
-            
         user = User.query.filter_by(firebase_id=firebase_id).first()
         if not user:
             return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
@@ -320,20 +150,14 @@ def get_user(firebase_id):
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 @api.route('/user/<string:firebase_id>', methods=['PUT'])
-@firebase_auth_required
 def update_user(firebase_id):
     try:
-        # Verify user can only update their own profile
-        if request.firebase_uid != firebase_id:
-            return jsonify({"error": "Unauthorized access"}), 403
-            
         user = User.query.filter_by(firebase_id=firebase_id).first()
         if not user:
             return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
         
-        # Validate update data
-        schema = UserSchema(partial=True)
-        data = schema.load(request.get_json())
+        # Get JSON data directly without schema validation
+        data = request.get_json()
         
         # Update user fields if provided in request
         if 'name' in data:
@@ -377,19 +201,12 @@ def update_user(firebase_id):
         
         return jsonify({"message": "User updated successfully"}), 200
     
-    except ValidationError as err:
-        return handle_validation_error(err)
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 @api.route('/user/<string:firebase_id>', methods=['DELETE'])
-@firebase_auth_required
 def delete_user(firebase_id):
     try:
-        # Verify user can only delete their own profile
-        if request.firebase_uid != firebase_id:
-            return jsonify({"error": "Unauthorized access"}), 403
-            
         user = User.query.filter_by(firebase_id=firebase_id).first()
         if not user:
             return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
@@ -405,6 +222,172 @@ def delete_user(firebase_id):
             return jsonify({"error": f"Database error: {str(e)}"}), 500
         
         return jsonify({"message": "User deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+# --------------------- Bookmark Routes ---------------------
+
+@api.route('/bookmarks', methods=['GET'])
+def get_bookmarks():
+    try:
+        # Parse and validate pagination parameters
+        pagination_schema = PaginationParamsSchema()
+        try:
+            pagination_params = pagination_schema.load(request.args)
+        except ValidationError as err:
+            return handle_validation_error(err)
+        
+        page = pagination_params['page']
+        per_page = pagination_params['per_page']
+        
+        firebase_id = request.args.get('firebase_id')
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        if not user:
+            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
+        
+        # Query with ordering by timestamp
+        query = UserBookmark.query.filter_by(user_id=user.id).order_by(UserBookmark.timestamp.desc())
+        
+        # Paginate results
+        pagination_result = paginate_results(query, page, per_page)
+        bookmarks = pagination_result['items']
+        
+        result = []
+        for bookmark in bookmarks:
+            scheme = bookmark.scheme
+            result.append({
+                "bookmark_id": bookmark.id,
+                "scheme_id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "bookmarked_at": bookmark.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                "notes": bookmark.notes
+            })
+        
+        # Return paginated response
+        return jsonify({
+            "bookmarks": result,
+            "pagination": pagination_result['pagination']
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@api.route('/bookmarks', methods=['POST'])
+def create_bookmark():
+    try:
+        # Get firebase_id from request body
+        data = request.get_json()
+        firebase_id = data.get('firebase_id')
+        
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        if not user:
+            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
+        
+        # Validate input data
+        schema = BookmarkSchema()
+        try:
+            bookmark_data = schema.load(data)
+        except ValidationError as err:
+            return handle_validation_error(err)
+        
+        scheme_id = bookmark_data.get('scheme_id')
+        notes = bookmark_data.get('notes')
+        
+        # Check if scheme exists
+        scheme = Scheme.query.get(scheme_id)
+        if not scheme:
+            return jsonify({"error": f"Scheme with ID {scheme_id} not found"}), 404
+        
+        # Check if bookmark already exists
+        existing_bookmark = UserBookmark.query.filter_by(user_id=user.id, scheme_id=scheme_id).first()
+        if existing_bookmark:
+            return jsonify({"error": "Bookmark already exists", "bookmark_id": existing_bookmark.id}), 400
+        
+        # Create bookmark
+        bookmark = UserBookmark(
+            user_id=user.id,
+            scheme_id=scheme_id,
+            notes=notes
+        )
+        
+        db.session.add(bookmark)
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"Database error: {str(e)}"}), 500
+        
+        return jsonify({
+            "message": "Bookmark created successfully", 
+            "bookmark_id": bookmark.id
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@api.route('/bookmarks/<int:bookmark_id>', methods=['PUT'])
+def update_bookmark(bookmark_id):
+    try:
+        # Get firebase_id from request body
+        data = request.get_json()
+        firebase_id = data.get('firebase_id')
+        
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        if not user:
+            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
+        
+        # Get bookmark and verify ownership
+        bookmark = UserBookmark.query.get(bookmark_id)
+        if not bookmark:
+            return jsonify({"error": f"Bookmark with ID {bookmark_id} not found"}), 404
+        
+        if bookmark.user_id != user.id:
+            return jsonify({"error": "Unauthorized access"}), 403
+        
+        # Update notes
+        if 'notes' in data:
+            bookmark.notes = data['notes']
+            bookmark.timestamp = datetime.utcnow()  # Update timestamp to reflect the change
+            
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": f"Database error: {str(e)}"}), 500
+            
+            return jsonify({"message": "Bookmark updated successfully"}), 200
+        else:
+            return jsonify({"error": "No update data provided"}), 400
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@api.route('/bookmarks/<int:bookmark_id>', methods=['DELETE'])
+def delete_bookmark(bookmark_id):
+    try:
+        # Get firebase_id from request body
+        data = request.get_json()
+        firebase_id = data.get('firebase_id')
+        
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        if not user:
+            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
+        
+        # Get bookmark and verify ownership
+        bookmark = UserBookmark.query.get(bookmark_id)
+        if not bookmark:
+            return jsonify({"error": f"Bookmark with ID {bookmark_id} not found"}), 404
+        
+        if bookmark.user_id != user.id:
+            return jsonify({"error": "Unauthorized access"}), 403
+        
+        db.session.delete(bookmark)
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"Database error: {str(e)}"}), 500
+        
+        return jsonify({"message": "Bookmark deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
@@ -585,172 +568,9 @@ def search_schemes():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
-# --------------------- Bookmark Routes ---------------------
-
-@api.route('/bookmarks', methods=['GET'])
-@firebase_auth_required
-def get_bookmarks():
-    try:
-        # Parse and validate pagination parameters
-        pagination_schema = PaginationParamsSchema()
-        try:
-            pagination_params = pagination_schema.load(request.args)
-        except ValidationError as err:
-            return handle_validation_error(err)
-        
-        page = pagination_params['page']
-        per_page = pagination_params['per_page']
-        
-        firebase_id = request.firebase_uid
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        if not user:
-            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
-        
-        # Query with ordering by timestamp
-        query = UserBookmark.query.filter_by(user_id=user.id).order_by(UserBookmark.timestamp.desc())
-        
-        # Paginate results
-        pagination_result = paginate_results(query, page, per_page)
-        bookmarks = pagination_result['items']
-        
-        result = []
-        for bookmark in bookmarks:
-            scheme = bookmark.scheme
-            result.append({
-                "bookmark_id": bookmark.id,
-                "scheme_id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "bookmarked_at": bookmark.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                "notes": bookmark.notes
-            })
-        
-        # Return paginated response
-        return jsonify({
-            "bookmarks": result,
-            "pagination": pagination_result['pagination']
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-@api.route('/bookmarks', methods=['POST'])
-@firebase_auth_required
-def create_bookmark():
-    try:
-        firebase_id = request.firebase_uid
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        if not user:
-            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
-        
-        # Validate input data
-        schema = BookmarkSchema()
-        try:
-            data = schema.load(request.get_json())
-        except ValidationError as err:
-            return handle_validation_error(err)
-        
-        scheme_id = data.get('scheme_id')
-        notes = data.get('notes')
-        
-        # Check if scheme exists
-        scheme = Scheme.query.get(scheme_id)
-        if not scheme:
-            return jsonify({"error": f"Scheme with ID {scheme_id} not found"}), 404
-        
-        # Check if bookmark already exists
-        existing_bookmark = UserBookmark.query.filter_by(user_id=user.id, scheme_id=scheme_id).first()
-        if existing_bookmark:
-            return jsonify({"error": "Bookmark already exists", "bookmark_id": existing_bookmark.id}), 400
-        
-        # Create bookmark
-        bookmark = UserBookmark(
-            user_id=user.id,
-            scheme_id=scheme_id,
-            notes=notes
-        )
-        
-        db.session.add(bookmark)
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": f"Database error: {str(e)}"}), 500
-        
-        return jsonify({
-            "message": "Bookmark created successfully", 
-            "bookmark_id": bookmark.id
-        }), 201
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-@api.route('/bookmarks/<int:bookmark_id>', methods=['PUT'])
-@firebase_auth_required
-def update_bookmark(bookmark_id):
-    try:
-        firebase_id = request.firebase_uid
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        if not user:
-            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
-        
-        # Get bookmark and verify ownership
-        bookmark = UserBookmark.query.get(bookmark_id)
-        if not bookmark:
-            return jsonify({"error": f"Bookmark with ID {bookmark_id} not found"}), 404
-        
-        if bookmark.user_id != user.id:
-            return jsonify({"error": "Unauthorized access"}), 403
-        
-        # Update notes
-        data = request.get_json()
-        if 'notes' in data:
-            bookmark.notes = data['notes']
-            bookmark.timestamp = datetime.utcnow()  # Update timestamp to reflect the change
-            
-            try:
-                db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                return jsonify({"error": f"Database error: {str(e)}"}), 500
-            
-            return jsonify({"message": "Bookmark updated successfully"}), 200
-        else:
-            return jsonify({"error": "No update data provided"}), 400
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-@api.route('/bookmarks/<int:bookmark_id>', methods=['DELETE'])
-@firebase_auth_required
-def delete_bookmark(bookmark_id):
-    try:
-        firebase_id = request.firebase_uid
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        if not user:
-            return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
-        
-        # Get bookmark and verify ownership
-        bookmark = UserBookmark.query.get(bookmark_id)
-        if not bookmark:
-            return jsonify({"error": f"Bookmark with ID {bookmark_id} not found"}), 404
-        
-        if bookmark.user_id != user.id:
-            return jsonify({"error": "Unauthorized access"}), 403
-        
-        db.session.delete(bookmark)
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": f"Database error: {str(e)}"}), 500
-        
-        return jsonify({"message": "Bookmark deleted successfully"}), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
 # --------------------- Recommendation Routes ---------------------
 
 @api.route('/recommendations', methods=['GET'])
-@firebase_auth_required
 def get_recommendations():
     try:
         # Parse and validate pagination parameters
@@ -763,27 +583,157 @@ def get_recommendations():
         page = pagination_params['page']
         per_page = pagination_params['per_page']
             
-        firebase_id = request.firebase_uid
+        firebase_id = request.args.get('firebase_id')
         user = User.query.filter_by(firebase_id=firebase_id).first()
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
             
-        # Get recommendations based on user preferences
-        recommendations = Recommendation.query.filter_by(user_id=user.id)\
-            .paginate(page=page, per_page=per_page, error_out=False)
+        # Query schemes based on user profile
+        query = Scheme.query
+        
+        # Filter schemes based on user preferences
+        if user.gender:
+            query = query.filter(or_(Scheme.gender == user.gender, Scheme.gender == None))
+        
+        if user.residence_type:
+            query = query.filter(or_(Scheme.residence_type == user.residence_type, Scheme.residence_type == None))
+        
+        if user.city:
+            query = query.filter(or_(Scheme.city == user.city, Scheme.city == None))
+        
+        if user.income is not None:
+            query = query.filter(or_(Scheme.income >= user.income, Scheme.income == None))
+        
+        if user.differently_abled is not None:
+            query = query.filter(or_(Scheme.differently_abled == user.differently_abled, Scheme.differently_abled == None))
+        
+        if user.minority is not None:
+            query = query.filter(or_(Scheme.minority == user.minority, Scheme.minority == None))
+        
+        if user.bpl_category is not None:
+            query = query.filter(or_(Scheme.bpl_category == user.bpl_category, Scheme.bpl_category == None))
+        
+        # Order by relevance (you can implement more sophisticated ordering)
+        query = query.order_by(Scheme.scheme_name)
+        
+        # Paginate results
+        pagination_result = paginate_results(query, page, per_page)
+        schemes = pagination_result['items']
+        
+        # Format response
+        result = []
+        for scheme in schemes:
+            # Calculate match score and similarity
+            match_score = calculate_match_score(user, scheme)
             
-        # Serialize the results
-        result = {
-            'items': [item.to_dict() for item in recommendations.items],
-            'page': recommendations.page,
-            'pages': recommendations.pages,
-            'total': recommendations.total
-        }
-            
-        return jsonify(result), 200
-            
+            result.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "match_score": match_score,
+                "benefit_type": scheme.benefit_type,
+                "department": scheme.department
+            })
+        
+        # Sort result by match score
+        result.sort(key=lambda x: {"High": 3, "Medium": 2, "Low": 1}[x['match_score']], reverse=True)
+        
+        # Return paginated response
+        return jsonify({
+            "recommendations": result,
+            "pagination": pagination_result['pagination']
+        }), 200
     except Exception as e:
-        # Log the error
-        current_app.logger.error(f"Error in get_recommendations: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+def calculate_match_score(user, scheme):
+    """Calculate how well a scheme matches a user profile"""
+    score = 0
+    total_criteria = 0
+    
+    # Match gender
+    if scheme.gender is not None:
+        total_criteria += 1
+        if user.gender == scheme.gender:
+            score += 1
+    
+    # Match residence type
+    if scheme.residence_type is not None:
+        total_criteria += 1
+        if user.residence_type == scheme.residence_type:
+            score += 1
+    
+    # Match city
+    if scheme.city is not None:
+        total_criteria += 1
+        if user.city == scheme.city:
+            score += 1
+    
+    # Match income
+    if scheme.income is not None and user.income is not None:
+        total_criteria += 1
+        if user.income <= scheme.income:
+            score += 1
+    
+    # Match differently_abled status
+    if scheme.differently_abled is not None:
+        total_criteria += 1
+        if user.differently_abled == scheme.differently_abled:
+            score += 1
+    
+    # Match minority status
+    if scheme.minority is not None:
+        total_criteria += 1
+        if user.minority == scheme.minority:
+            score += 1
+    
+    # Match BPL category
+    if scheme.bpl_category is not None:
+        total_criteria += 1
+        if user.bpl_category == scheme.bpl_category:
+            score += 1
+    
+    # Match occupation
+    if scheme.occupation is not None:
+        total_criteria += 1
+        if user.occupation == scheme.occupation:
+            score += 1
+    
+    # Match marital status
+    if scheme.marital_status is not None:
+        total_criteria += 1
+        if user.marital_status == scheme.marital_status:
+            score += 1
+    
+    # Match caste/category
+    if scheme.caste is not None:
+        total_criteria += 1
+        if user.category == scheme.caste:
+            score += 1
+    
+    # Calculate age if dob is available and scheme has age criteria
+    if user.dob and scheme.age_range:
+        total_criteria += 1
+        try:
+            today = datetime.now().date()
+            age = today.year - user.dob.year - ((today.month, today.day) < (user.dob.month, user.dob.day))
+            
+            age_min, age_max = map(int, scheme.age_range.split('-'))
+            if age_min <= age <= age_max:
+                score += 1
+        except (ValueError, AttributeError):
+            # If age range format is incorrect, ignore this criterion
+            total_criteria -= 1
+    
+    # Calculate percentage match
+    match_percentage = (score / total_criteria * 100) if total_criteria > 0 else 0
+    
+    # Return match label based on percentage
+    if match_percentage >= 80:
+        return "High"
+    elif match_percentage >= 50:
+        return "Medium"
+    else:
+        return "Low"
