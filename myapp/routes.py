@@ -5,6 +5,9 @@ import math
 import os
 import json
 import base64
+import spacy
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark
@@ -66,6 +69,162 @@ def paginate_results(query, page, per_page):
 def handle_validation_error(error):
     """Helper function to format validation errors"""
     return jsonify({"error": "Validation error", "details": error.messages}), 400
+
+# Load spaCy model - you'll need to install it first with:
+# python -m spacy download en_core_web_md
+nlp = spacy.load('en_core_web_md')
+
+def preprocess_text(text):
+    """Preprocess text by removing stopwords and punctuation"""
+    if not text or not isinstance(text, str):
+        return ""
+    
+    doc = nlp(text.lower())
+    # Remove stopwords and punctuation
+    tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct]
+    return " ".join(tokens)
+
+def get_text_embedding(text):
+    """Convert text to embedding vector using spaCy"""
+    if not text or not isinstance(text, str):
+        return None
+    
+    processed_text = preprocess_text(text)
+    if not processed_text:
+        return None
+    
+    # Get document vector
+    doc = nlp(processed_text)
+    return doc.vector
+
+def calculate_text_similarity(text1, text2):
+    """Calculate cosine similarity between two text strings"""
+    if not text1 or not text2:
+        return 0.0
+    
+    vec1 = get_text_embedding(text1)
+    vec2 = get_text_embedding(text2)
+    
+    if vec1 is None or vec2 is None:
+        return 0.0
+    
+    # Reshape vectors for cosine_similarity function
+    vec1 = vec1.reshape(1, -1)
+    vec2 = vec2.reshape(1, -1)
+    
+    # Calculate cosine similarity
+    similarity = cosine_similarity(vec1, vec2)[0][0]
+    return float(similarity)
+
+def extract_keywords(text, num_keywords=5):
+    """Extract important keywords from text"""
+    if not text or not isinstance(text, str):
+        return []
+    
+    doc = nlp(text.lower())
+    
+    # Get all tokens that are not stopwords or punctuation
+    keywords = []
+    for token in doc:
+        if not token.is_stop and not token.is_punct and token.pos_ in ('NOUN', 'PROPN', 'ADJ'):
+            keywords.append(token.text)
+    
+    # Count frequencies
+    keyword_freq = {}
+    for word in keywords:
+        if word in keyword_freq:
+            keyword_freq[word] += 1
+        else:
+            keyword_freq[word] = 1
+    
+    # Sort by frequency and return top N
+    sorted_keywords = sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)
+    return [word for word, freq in sorted_keywords[:num_keywords]]
+
+# Enhanced recommendation function that could replace or supplement the existing one
+def get_enhanced_recommendations(user, schemes, max_results=10):
+    """Get scheme recommendations with NLP-enhanced matching"""
+    results = []
+    
+    # Create a user profile description
+    user_profile = f"{user.gender or ''} {user.age or ''} {user.occupation or ''} {user.city or ''} " \
+                   f"{user.residence_type or ''} {user.education_level or ''} {user.category or ''}"
+    user_embedding = get_text_embedding(user_profile)
+    
+    for scheme in schemes:
+        # Create scheme description for matching
+        scheme_desc = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''} " \
+                     f"{scheme.benefit_type or ''} {scheme.occupation or ''} {scheme.gender or ''}"
+        
+        # Calculate text similarity
+        scheme_embedding = get_text_embedding(scheme_desc)
+        
+        if user_embedding is not None and scheme_embedding is not None:
+            # Calculate semantic similarity between user profile and scheme
+            semantic_score = cosine_similarity(
+                user_embedding.reshape(1, -1), 
+                scheme_embedding.reshape(1, -1)
+            )[0][0]
+            
+            # Combine with rule-based matching from original function
+            rule_score = calculate_match_score(user, scheme)
+            rule_score_numeric = {"High": 1.0, "Medium": 0.6, "Low": 0.3}[rule_score]
+            
+            # Combine scores (you can adjust the weights)
+            combined_score = 0.7 * rule_score_numeric + 0.3 * semantic_score
+            
+            results.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "semantic_score": float(semantic_score),
+                "rule_score": rule_score,
+                "combined_score": float(combined_score),
+                "keywords": extract_keywords(scheme.description, 3)
+            })
+    
+    # Sort by combined score
+    results.sort(key=lambda x: x["combined_score"], reverse=True)
+    return results[:max_results]
+
+# Enhanced search function with NLP
+def search_schemes_nlp(query_text, schemes, max_results=20):
+    """Search schemes using NLP techniques"""
+    if not query_text:
+        return []
+    
+    results = []
+    query_embedding = get_text_embedding(query_text)
+    
+    if query_embedding is None:
+        return []
+    
+    for scheme in schemes:
+        # Create scheme text for searching
+        scheme_text = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''}"
+        scheme_embedding = get_text_embedding(scheme_text)
+        
+        if scheme_embedding is not None:
+            # Calculate similarity
+            similarity = cosine_similarity(
+                query_embedding.reshape(1, -1),
+                scheme_embedding.reshape(1, -1)
+            )[0][0]
+            
+            if similarity > 0.3:  # Only include somewhat relevant results
+                results.append({
+                    "id": scheme.id,
+                    "scheme_name": scheme.scheme_name,
+                    "category": scheme.category,
+                    "description": scheme.description,
+                    "similarity": float(similarity),
+                    "keywords": extract_keywords(scheme.description, 3)
+                })
+    
+    # Sort by similarity score
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+    return results[:max_results]
 
 # --------------------- User Routes ---------------------
 
@@ -737,3 +896,44 @@ def calculate_match_score(user, scheme):
         return "Medium"
     else:
         return "Low"
+
+@api.route('/recommendations/enhanced', methods=['GET'])
+def get_enhanced_recommendations_route():
+    try:
+        firebase_id = request.args.get('firebase_id')
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        # Get all schemes - you might want to limit this in production
+        schemes = Scheme.query.all()
+        
+        # Use the NLP-enhanced recommendation function
+        recommendations = get_enhanced_recommendations(user, schemes)
+        
+        return jsonify({
+            "recommendations": recommendations
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+@api.route('/schemes/search/enhanced', methods=['GET'])
+def search_schemes_enhanced():
+    try:
+        query_text = request.args.get('q', '')
+        if not query_text or len(query_text.strip()) == 0:
+            return jsonify({"error": "Search query cannot be empty"}), 400
+        
+        # Get all schemes - you might want to limit this in production
+        schemes = Scheme.query.all()
+        
+        # Use the NLP-enhanced search function
+        results = search_schemes_nlp(query_text, schemes)
+        
+        return jsonify({
+            "query": query_text,
+            "schemes": results
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
