@@ -727,6 +727,110 @@ def search_schemes():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
+@api.route('/schemes/unified', methods=['GET'])
+def unified_schemes():
+    try:
+        # Parse and validate pagination parameters
+        pagination_schema = PaginationParamsSchema()
+        try:
+            pagination_params = pagination_schema.load(request.args)
+        except ValidationError as err:
+            return handle_validation_error(err)
+        
+        page = pagination_params['page']
+        per_page = pagination_params['per_page']
+        
+        # Get search query (optional)
+        query_text = request.args.get('q', '').strip()
+        
+        # Get filter parameters (all optional)
+        category = request.args.get('category')
+        gender = request.args.get('gender')
+        residence_type = request.args.get('residence_type')
+        city = request.args.get('city')
+        income_max = request.args.get('income_max', type=float)
+        
+        # Convert string boolean parameters to actual booleans
+        differently_abled = request.args.get('differently_abled')
+        if differently_abled is not None:
+            differently_abled = differently_abled.lower() == 'true'
+            
+        minority = request.args.get('minority')
+        if minority is not None:
+            minority = minority.lower() == 'true'
+            
+        bpl_category = request.args.get('bpl_category')
+        if bpl_category is not None:
+            bpl_category = bpl_category.lower() == 'true'
+        
+        # Start with base query
+        query = Scheme.query
+        
+        # Apply search if query text is provided
+        if query_text:
+            query = query.filter(
+                or_(
+                    Scheme.scheme_name.ilike(f'%{query_text}%'),
+                    Scheme.description.ilike(f'%{query_text}%'),
+                    Scheme.keywords.ilike(f'%{query_text}%'),
+                    Scheme.benefit_type.ilike(f'%{query_text}%'),
+                    Scheme.department.ilike(f'%{query_text}%')
+                )
+            )
+        
+        # Apply filters if provided
+        if category:
+            query = query.filter(Scheme.category == category)
+        if gender:
+            query = query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
+        if residence_type:
+            query = query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
+        if city:
+            query = query.filter(or_(Scheme.city == city, Scheme.city == None))
+        if income_max:
+            query = query.filter(or_(Scheme.income >= income_max, Scheme.income == None))
+        if differently_abled is not None:
+            query = query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
+        if minority is not None:
+            query = query.filter(or_(Scheme.minority == minority, Scheme.minority == None))
+        if bpl_category is not None:
+            query = query.filter(or_(Scheme.bpl_category == bpl_category, Scheme.bpl_category == None))
+        
+        # Order by scheme name
+        query = query.order_by(Scheme.scheme_name)
+        
+        # Paginate results
+        pagination_result = paginate_results(query, page, per_page)
+        schemes = pagination_result['items']
+        
+        # Format response
+        result = []
+        for scheme in schemes:
+            result.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "benefit_type": scheme.benefit_type,
+                "application_link": scheme.application_link,
+                "department": scheme.department,
+                "launch_date": scheme.launch_date.strftime('%Y-%m-%d') if scheme.launch_date else None,
+                "expiry_date": scheme.expiry_date.strftime('%Y-%m-%d') if scheme.expiry_date else None,
+            })
+        
+        # Return paginated response with search query in response if provided
+        response_data = {
+            "schemes": result,
+            "pagination": pagination_result['pagination']
+        }
+        
+        if query_text:
+            response_data["query"] = query_text
+            
+        return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
 # --------------------- Recommendation Routes ---------------------
 
 @api.route('/recommendations', methods=['GET'])
