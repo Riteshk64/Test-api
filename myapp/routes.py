@@ -754,7 +754,7 @@ def unified_schemes():
         gender = request.args.get('gender')
         residence_type = request.args.get('residence_type')
         city = request.args.get('city')
-        income_max = request.args.get('income_max', type=float)
+        income = request.args.get('income', type=float)  # Directly use income as parameter
         
         # Convert string boolean parameters to actual booleans
         differently_abled = request.args.get('differently_abled')
@@ -793,8 +793,8 @@ def unified_schemes():
             query = query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
         if city:
             query = query.filter(or_(Scheme.city == city, Scheme.city == None))
-        if income_max:
-            query = query.filter(or_(Scheme.income >= income_max, Scheme.income == None))
+        if income is not None:  # Only filter by income if provided
+            query = query.filter(Scheme.income <= income)
         if differently_abled is not None:
             query = query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
         if minority is not None:
