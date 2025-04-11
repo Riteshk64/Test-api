@@ -144,23 +144,24 @@ def extract_keywords(text, num_keywords=5):
 
 # Enhanced recommendation function that could replace or supplement the existing one
 def get_enhanced_recommendations(user, schemes, max_results=10):
-    """Get NLP + rule-based scheme recommendations"""
+    """Get NLP + rule-based scheme recommendations using precomputed embeddings."""
     results = []
 
-    # Create user profile description
+    # Create a user profile embedding
     user_profile = f"{user.gender or ''} {user.age or ''} {user.occupation or ''} {user.city or ''} " \
                    f"{user.residence_type or ''} {user.education_level or ''} {user.category or ''}"
     user_embedding = get_text_embedding(user_profile)
-
     if user_embedding is None:
         return []
 
     for scheme in schemes:
-        scheme_desc = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''} " \
-                      f"{scheme.benefit_type or ''} {scheme.occupation or ''} {scheme.gender or ''}"
-        scheme_embedding = get_text_embedding(scheme_desc)
+        if not scheme.embedding:
+            continue  # Skip if embedding not stored
 
-        if scheme_embedding is None:
+        # Load embedding from DB
+        try:
+            scheme_embedding = np.frombuffer(scheme.embedding, dtype=np.float32)
+        except Exception:
             continue
 
         semantic_score = cosine_similarity(
@@ -187,108 +188,59 @@ def get_enhanced_recommendations(user, schemes, max_results=10):
     results.sort(key=lambda x: x["combined_score"], reverse=True)
     return results[:max_results]
 
-    """Get scheme recommendations with NLP-enhanced matching"""
+# Enhanced search function with NLP
+def search_schemes_nlp(query_text, schemes, max_results=20):
+    """Search schemes using precomputed embeddings and semantic similarity."""
+    if not query_text:
+        return []
+
+    query_embedding = get_text_embedding(query_text)
+    if query_embedding is None:
+        return []
+
     results = []
-    
-    # Create a user profile description
-    user_profile = f"{user.gender or ''} {user.age or ''} {user.occupation or ''} {user.city or ''} " \
-                   f"{user.residence_type or ''} {user.education_level or ''} {user.category or ''}"
-    user_embedding = get_text_embedding(user_profile)
-    
+
     for scheme in schemes:
-        # Create scheme description for matching
-        scheme_desc = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''} " \
-                     f"{scheme.benefit_type or ''} {scheme.occupation or ''} {scheme.gender or ''}"
-        
-        # Calculate text similarity
-        scheme_embedding = get_text_embedding(scheme_desc)
-        
-        if user_embedding is not None and scheme_embedding is not None:
-            # Calculate semantic similarity between user profile and scheme
-            semantic_score = cosine_similarity(
-                user_embedding.reshape(1, -1), 
-                scheme_embedding.reshape(1, -1)
-            )[0][0]
-            
-            # Combine with rule-based matching from original function
-            rule_score = calculate_match_score(user, scheme)
-            rule_score_numeric = {"High": 1.0, "Medium": 0.6, "Low": 0.3}[rule_score]
-            
-            # Combine scores (you can adjust the weights)
-            combined_score = 0.7 * rule_score_numeric + 0.3 * semantic_score
-            
+        if not scheme.embedding:
+            continue  # Skip if missing embedding
+
+        try:
+            scheme_embedding = np.frombuffer(scheme.embedding, dtype=np.float32)
+        except Exception:
+            continue
+
+        similarity = cosine_similarity(
+            query_embedding.reshape(1, -1),
+            scheme_embedding.reshape(1, -1)
+        )[0][0]
+
+        if similarity > 0.3:
             results.append({
                 "id": scheme.id,
                 "scheme_name": scheme.scheme_name,
                 "category": scheme.category,
                 "description": scheme.description,
-                "semantic_score": float(semantic_score),
-                "rule_score": rule_score,
-                "combined_score": float(combined_score),
+                "similarity": float(similarity),
                 "keywords": extract_keywords(scheme.description, 3)
             })
-    
-    # Sort by combined score
-    results.sort(key=lambda x: x["combined_score"], reverse=True)
-    return results[:max_results]
 
-# Enhanced search function with NLP
-def search_schemes_nlp(query_text, schemes, max_results=20):
-    """Search schemes using NLP techniques"""
-    if not query_text:
-        return []
-    
-    results = []
-    query_embedding = get_text_embedding(query_text)
-    
-    if query_embedding is None:
-        return []
-    
-    for scheme in schemes:
-        # Create scheme text for searching
-        scheme_text = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''}"
-        scheme_embedding = get_text_embedding(scheme_text)
-        
-        if scheme_embedding is not None:
-            # Calculate similarity
-            similarity = cosine_similarity(
-                query_embedding.reshape(1, -1),
-                scheme_embedding.reshape(1, -1)
-            )[0][0]
-            
-            if similarity > 0.3:  # Only include somewhat relevant results
-                results.append({
-                    "id": scheme.id,
-                    "scheme_name": scheme.scheme_name,
-                    "category": scheme.category,
-                    "description": scheme.description,
-                    "similarity": float(similarity),
-                    "keywords": extract_keywords(scheme.description, 3)
-                })
-    
-    # Sort by similarity score
     results.sort(key=lambda x: x["similarity"], reverse=True)
     return results[:max_results]
 
-def detect_categories_from_query(query_text, category_list, synonym_map):
-    """Detect all relevant categories from a query"""
-    doc = nlp(query_text.lower())
-    matched_categories = set()
+def detect_categories_from_query(query, categories, synonyms):
+    detected = set()
+    query_lower = query.lower()
 
-    # Keyword-based detection using synonym mapping
-    for token in doc:
-        lemma = token.lemma_.lower()
-        if lemma in synonym_map:
-            matched_categories.add(synonym_map[lemma])
+    for word, category in synonyms.items():
+        if word in query_lower and category in categories:
+            detected.add(category)
 
-    # SpaCy similarity-based fallback
-    for category in category_list:
-        cat_doc = nlp(category.lower())
-        similarity = doc.similarity(cat_doc)
-        if similarity >= 0.60:
-            matched_categories.add(category)
+    # Optional: Match exact category names if used directly
+    for category in categories:
+        if category in query_lower:
+            detected.add(category)
 
-    return list(matched_categories)
+    return list(detected)
 
 def normalize_number_phrase(text):
     """
@@ -1261,22 +1213,50 @@ def search_schemes_enhanced():
         per_page = request.args.get('per_page', 10, type=int)
 
         # Categories and synonyms
-        categories = ['Education', 'Scholarship', 'Hospital', 'Agriculture', 'Insurance', 'Housing', 'Fund support']
+        categories = ['health',
+                    'insurance',
+                    'employment',
+                    'agriculture',
+                    'housing',
+                    'financial assistance',
+                    'safety',
+                    'subsidy',
+                    'education',
+                    'pension',
+                    'business',
+                    'loan']
+
         synonyms = {
-            "educational": "Education",
-            "college": "Education",
-            "student": "Scholarship",
-            "financial": "Fund support",
-            "loan": "Fund support",
-            "money": "Fund support",
-            "medical": "Hospital",
-            "health": "Hospital",
-            "farmer": "Agriculture",
-            "crop": "Agriculture",
-            "farming": "Agriculture",
-            "insurance": "Insurance",
-            "home": "Housing",
-            "residence": "Housing"
+            "medical": "health",
+            "hospital": "health",
+            "doctor": "health",
+            "crop": "agriculture",
+            "farmer": "agriculture",
+            "farming": "agriculture",
+            "home": "housing",
+            "residence": "housing",
+            "rent": "housing",
+            "financial": "financial assistance",
+            "money": "financial assistance",
+            "loan": "loan",
+            "student": "education",
+            "college": "education",
+            "school": "education",
+            "teacher": "education",
+            "pensioner": "pension",
+            "retired": "pension",
+            "business": "business",
+            "startup": "business",
+            "insurance": "insurance",
+            "premium": "insurance",
+            "job": "employment",
+            "employment": "employment",
+            "unemployed": "employment",
+            "protection": "safety",
+            "violence": "safety",
+            "assistance": "financial assistance",
+            "grant": "subsidy",
+            "subsidy": "subsidy"
         }
 
         # Category detection
