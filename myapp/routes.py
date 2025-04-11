@@ -1236,8 +1236,8 @@ def search_schemes_enhanced():
             "home": "Housing",
             "residence": "Housing",
             "rent": "Housing",
-            "financial": "Financial Assistance",
-            "money": "Financial Assistance",
+            "financial": "Financial assistance",
+            "money": "Financial assistance",
             "loan": "Loan",
             "student": "Education",
             "college": "Education",
@@ -1254,7 +1254,7 @@ def search_schemes_enhanced():
             "unemployed": "Employment",
             "protection": "Safety",
             "violence": "Safety",
-            "assistance": "Financial Assistance",
+            "assistance": "Financial assistance",
             "grant": "Subsidy",
             "subsidy": "Subsidy"
         }
