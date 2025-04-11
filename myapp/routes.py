@@ -1273,7 +1273,9 @@ def search_schemes_enhanced():
         # Build base query
         scheme_query = Scheme.query
         if matched_categories:
-            scheme_query = scheme_query.filter(Scheme.category.in_(matched_categories))
+            scheme_query = scheme_query.filter(
+                or_(*[Scheme.category.ilike(f"%{cat}%") for cat in matched_categories])
+            )
         if residence_type:
             scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
         if gender:
@@ -1281,7 +1283,7 @@ def search_schemes_enhanced():
         if city:
             scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
         if income is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.income >= income, Scheme.income == None))
+            scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
 
         # --- Age Range Filtering ---
         def scheme_matches_age(user_age, age_range_str):
