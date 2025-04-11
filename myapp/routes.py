@@ -233,41 +233,6 @@ def get_enhanced_recommendations(user, schemes, max_results=10):
 
 # Enhanced search function with NLP
 def search_schemes_nlp(query_text, schemes, max_results=20):
-    """Search schemes using NLP similarity"""
-    if not query_text:
-        return []
-
-    results = []
-    query_embedding = get_text_embedding(query_text)
-
-    if query_embedding is None:
-        return []
-
-    for scheme in schemes:
-        scheme_text = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''}"
-        scheme_embedding = get_text_embedding(scheme_text)
-
-        if scheme_embedding is None:
-            continue
-
-        similarity = cosine_similarity(
-            query_embedding.reshape(1, -1),
-            scheme_embedding.reshape(1, -1)
-        )[0][0]
-
-        if similarity > 0.3:
-            results.append({
-                "id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "similarity": float(similarity),
-                "keywords": extract_keywords(scheme.description, 3)
-            })
-
-    results.sort(key=lambda x: x["similarity"], reverse=True)
-    return results[:max_results]
-
     """Search schemes using NLP techniques"""
     if not query_text:
         return []
@@ -303,6 +268,57 @@ def search_schemes_nlp(query_text, schemes, max_results=20):
     # Sort by similarity score
     results.sort(key=lambda x: x["similarity"], reverse=True)
     return results[:max_results]
+
+def detect_categories_from_query(query_text, category_list, synonym_map):
+    """Detect all relevant categories from a query"""
+    doc = nlp(query_text.lower())
+    matched_categories = set()
+
+    # Keyword-based detection using synonym mapping
+    for token in doc:
+        lemma = token.lemma_.lower()
+        if lemma in synonym_map:
+            matched_categories.add(synonym_map[lemma])
+
+    # SpaCy similarity-based fallback
+    for category in category_list:
+        cat_doc = nlp(category.lower())
+        similarity = doc.similarity(cat_doc)
+        if similarity >= 0.60:
+            matched_categories.add(category)
+
+    return list(matched_categories)
+
+def detect_filters_from_query(query_text):
+    """Extract gender, residence_type, and city from query"""
+    doc = nlp(query_text.lower())
+
+    # Defined options
+    residence_options = {'rural', 'urban', 'semi-urban'}
+    gender_options = {'male', 'female', 'other'}
+
+    # Detect filters
+    filters = {
+        'residence_type': None,
+        'gender': None,
+        'city': None
+    }
+
+    for token in doc:
+        lemma = token.lemma_.lower()
+        if lemma in residence_options:
+            filters['residence_type'] = lemma
+        elif lemma in gender_options:
+            filters['gender'] = lemma
+
+    # Try to find a city match from known cities in DB
+    known_cities = {row.city.lower() for row in db.session.query(Scheme.city).distinct() if row.city}
+    for token in doc:
+        if token.text.lower() in known_cities:
+            filters['city'] = token.text
+            break
+
+    return filters
 
 # --------------------- User Routes ---------------------
 
@@ -1169,16 +1185,56 @@ def search_schemes_enhanced():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
 
-        # Filter + paginate schemes to limit load
-        base_query = Scheme.query.order_by(Scheme.scheme_name)
-        pagination = base_query.paginate(page=page, per_page=per_page, error_out=False)
+        # Categories and synonyms
+        categories = ['Education', 'Scholarship', 'Hospital', 'Agriculture', 'Insurance', 'Housing', 'Fund support']
+        synonyms = {
+            "educational": "Education",
+            "college": "Education",
+            "student": "Scholarship",
+            "financial": "Fund support",
+            "loan": "Fund support",
+            "money": "Fund support",
+            "medical": "Hospital",
+            "health": "Hospital",
+            "farmer": "Agriculture",
+            "crop": "Agriculture",
+            "farming": "Agriculture",
+            "insurance": "Insurance",
+            "home": "Housing",
+            "residence": "Housing"
+        }
+
+        # NLP-based category detection
+        matched_categories = detect_categories_from_query(query_text, categories, synonyms)
+
+        filters = detect_filters_from_query(query_text)
+        residence_type = filters['residence_type']
+        gender = filters['gender']
+        city = filters['city']
+
+        # Filter schemes based on matched categories
+        if matched_categories:
+            scheme_query = Scheme.query.filter(Scheme.category.in_(matched_categories)).order_by(Scheme.scheme_name)
+        else:
+            scheme_query = Scheme.query.order_by(Scheme.scheme_name)
+        
+        if residence_type:
+            scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
+        if gender:
+            scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
+        if city:
+            scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
+
+
+        pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # NLP-enhanced search only on current page schemes
+        # NLP similarity ranking (on page results)
         results = search_schemes_nlp(query_text, schemes)
 
         return jsonify({
             "query": query_text,
+            "detected_categories": matched_categories,
             "schemes": results,
             "pagination": {
                 "page": pagination.page,
@@ -1189,23 +1245,6 @@ def search_schemes_enhanced():
                 "has_prev": pagination.has_prev
             }
         }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
-    try:
-        query_text = request.args.get('q', '')
-        if not query_text or len(query_text.strip()) == 0:
-            return jsonify({"error": "Search query cannot be empty"}), 400
-        
-        # Get all schemes - you might want to limit this in production
-        schemes = Scheme.query.all()
-        
-        # Use the NLP-enhanced search function
-        results = search_schemes_nlp(query_text, schemes)
-        
-        return jsonify({
-            "query": query_text,
-            "schemes": results
-        }), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
