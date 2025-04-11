@@ -290,8 +290,32 @@ def detect_categories_from_query(query_text, category_list, synonym_map):
 
     return list(matched_categories)
 
+def normalize_number_phrase(text):
+    """
+    Convert number phrases like '3 lakhs', '50k', '2 crore' to a float value.
+    """
+    text = text.lower().replace(',', '').strip()
+
+    match = re.search(r'(\d+\.?\d*)\s*(lakh|lakhs|k|thousand|crore)', text)
+    if match:
+        num = float(match.group(1))
+        unit = match.group(2)
+
+        if unit in ['lakh', 'lakhs']:
+            return num * 100000
+        elif unit in ['k', 'thousand']:
+            return num * 1000
+        elif unit == 'crore':
+            return num * 10000000
+
+    plain_num = re.search(r'\d{5,}', text)
+    if plain_num:
+        return float(plain_num.group())
+
+    return None
+
 def detect_filters_from_query(query_text):
-    """Extract gender, residence_type, city, income, age from query"""
+    """Extract gender, residence_type, city, income, and age from query"""
     doc = nlp(query_text.lower())
     residence_options = {'rural', 'urban', 'semi-urban'}
     gender_options = {'male', 'female', 'other'}
@@ -320,57 +344,28 @@ def detect_filters_from_query(query_text):
             break
 
     # --- Income Detection ---
-    income_match = re.search(r'(under|below|less than)\s+(\d+[,\d]*)', query_text.lower())
+    income_match = re.search(
+        r'(under|below|less than)\s+([^\s]+(?:\s*(?:lakh|lakhs|k|crore|thousand))?)',
+        query_text.lower()
+    )
     if income_match:
-        try:
-            amount = income_match.group(2).replace(',', '')
-            filters['income'] = float(amount)
-        except:
-            pass
+        value = normalize_number_phrase(income_match.group(2))
+        if value:
+            filters['income'] = value
 
-    # --- Age Detection via patterns ---
-    age_match = re.search(r'(age\s)?(above|over|older than)?\s*(\d{1,3})\s*(year|yo)?', query_text.lower())
+    # --- Age Detection ---
+    age_match = re.search(r'(above|over|older than)?\s*(\d{2,3})\s*(years|year|yo)?', query_text.lower())
     if age_match:
         try:
-            filters['age'] = int(age_match.group(3))
+            filters['age'] = int(age_match.group(2))
         except:
             pass
 
-    # --- Age Detection via keywords ---
+    # --- Age keywords ---
     if 'senior citizen' in query_text.lower():
         filters['age'] = 60
     elif 'youth' in query_text.lower():
-        filters['age'] = 25  # average within "18 to 35"
-
-    return filters
-
-    """Extract gender, residence_type, and city from query"""
-    doc = nlp(query_text.lower())
-
-    # Defined options
-    residence_options = {'rural', 'urban', 'semi-urban'}
-    gender_options = {'male', 'female', 'other'}
-
-    # Detect filters
-    filters = {
-        'residence_type': None,
-        'gender': None,
-        'city': None
-    }
-
-    for token in doc:
-        lemma = token.lemma_.lower()
-        if lemma in residence_options:
-            filters['residence_type'] = lemma
-        elif lemma in gender_options:
-            filters['gender'] = lemma
-
-    # Try to find a city match from known cities in DB
-    known_cities = {row.city.lower() for row in db.session.query(Scheme.city).distinct() if row.city}
-    for token in doc:
-        if token.text.lower() in known_cities:
-            filters['city'] = token.text
-            break
+        filters['age'] = 25
 
     return filters
 
