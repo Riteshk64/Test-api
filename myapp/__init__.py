@@ -15,4 +15,9 @@ def create_app():
 
     app.register_blueprint(api)
 
+    @app.cli.command("update-embeddings")
+    def cli_update_embeddings():
+        from myapp.utils import update_scheme_embeddings
+        update_scheme_embeddings()
+
     return app

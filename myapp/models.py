@@ -1,5 +1,6 @@
 from .extensions import db 
 from datetime import datetime
+from sqlalchemy.dialects.postgresql import BYTEA
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -52,6 +53,7 @@ class Scheme(db.Model):
     local_body = db.Column(db.String(100), nullable=True)  # For filtering by local governing bodies
     education_criteria = db.Column(db.String(255), nullable=True)  # Specific education requirements
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    embedding = db.Column(BYTEA, nullable=True)
     
     # Optional fields for multilingual support
     description_marathi = db.Column(db.Text, nullable=True)

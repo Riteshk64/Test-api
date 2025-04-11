@@ -143,6 +143,49 @@ def extract_keywords(text, num_keywords=5):
 
 # Enhanced recommendation function that could replace or supplement the existing one
 def get_enhanced_recommendations(user, schemes, max_results=10):
+    """Get NLP + rule-based scheme recommendations"""
+    results = []
+
+    # Create user profile description
+    user_profile = f"{user.gender or ''} {user.age or ''} {user.occupation or ''} {user.city or ''} " \
+                   f"{user.residence_type or ''} {user.education_level or ''} {user.category or ''}"
+    user_embedding = get_text_embedding(user_profile)
+
+    if user_embedding is None:
+        return []
+
+    for scheme in schemes:
+        scheme_desc = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''} " \
+                      f"{scheme.benefit_type or ''} {scheme.occupation or ''} {scheme.gender or ''}"
+        scheme_embedding = get_text_embedding(scheme_desc)
+
+        if scheme_embedding is None:
+            continue
+
+        semantic_score = cosine_similarity(
+            user_embedding.reshape(1, -1),
+            scheme_embedding.reshape(1, -1)
+        )[0][0]
+
+        rule_score = calculate_match_score(user, scheme)
+        rule_score_numeric = {"High": 1.0, "Medium": 0.6, "Low": 0.3}[rule_score]
+
+        combined_score = 0.7 * rule_score_numeric + 0.3 * semantic_score
+
+        results.append({
+            "id": scheme.id,
+            "scheme_name": scheme.scheme_name,
+            "category": scheme.category,
+            "description": scheme.description,
+            "semantic_score": float(semantic_score),
+            "rule_score": rule_score,
+            "combined_score": float(combined_score),
+            "keywords": extract_keywords(scheme.description, 3)
+        })
+
+    results.sort(key=lambda x: x["combined_score"], reverse=True)
+    return results[:max_results]
+
     """Get scheme recommendations with NLP-enhanced matching"""
     results = []
     
@@ -190,6 +233,41 @@ def get_enhanced_recommendations(user, schemes, max_results=10):
 
 # Enhanced search function with NLP
 def search_schemes_nlp(query_text, schemes, max_results=20):
+    """Search schemes using NLP similarity"""
+    if not query_text:
+        return []
+
+    results = []
+    query_embedding = get_text_embedding(query_text)
+
+    if query_embedding is None:
+        return []
+
+    for scheme in schemes:
+        scheme_text = f"{scheme.scheme_name or ''} {scheme.description or ''} {scheme.keywords or ''}"
+        scheme_embedding = get_text_embedding(scheme_text)
+
+        if scheme_embedding is None:
+            continue
+
+        similarity = cosine_similarity(
+            query_embedding.reshape(1, -1),
+            scheme_embedding.reshape(1, -1)
+        )[0][0]
+
+        if similarity > 0.3:
+            results.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "similarity": float(similarity),
+                "keywords": extract_keywords(scheme.description, 3)
+            })
+
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+    return results[:max_results]
+
     """Search schemes using NLP techniques"""
     if not query_text:
         return []
@@ -1011,6 +1089,59 @@ def calculate_match_score(user, scheme):
 def get_enhanced_recommendations_route():
     try:
         firebase_id = request.args.get('firebase_id')
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Compute age inline if dob is available
+        user.age = None
+        if user.dob:
+            today = datetime.today().date()
+            user.age = today.year - user.dob.year - ((today.month, today.day) < (user.dob.month, user.dob.day))
+
+        # Apply basic filters
+        query = Scheme.query
+        if user.gender:
+            query = query.filter(or_(Scheme.gender == user.gender, Scheme.gender == None))
+        if user.residence_type:
+            query = query.filter(or_(Scheme.residence_type == user.residence_type, Scheme.residence_type == None))
+        if user.city:
+            query = query.filter(or_(Scheme.city == user.city, Scheme.city == None))
+        if user.income is not None:
+            query = query.filter(or_(Scheme.income >= user.income, Scheme.income == None))
+        if user.differently_abled is not None:
+            query = query.filter(or_(Scheme.differently_abled == user.differently_abled, Scheme.differently_abled == None))
+        if user.minority is not None:
+            query = query.filter(or_(Scheme.minority == user.minority, Scheme.minority == None))
+        if user.bpl_category is not None:
+            query = query.filter(or_(Scheme.bpl_category == user.bpl_category, Scheme.bpl_category == None))
+
+        # Use pagination instead of query.all()
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        schemes = pagination.items
+
+        # Generate recommendations only for current page
+        recommendations = get_enhanced_recommendations(user, schemes)
+
+        return jsonify({
+            "recommendations": recommendations,
+            "pagination": {
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "total_items": pagination.total,
+                "total_pages": pagination.pages,
+                "has_next": pagination.has_next,
+                "has_prev": pagination.has_prev
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+    try:
+        firebase_id = request.args.get('firebase_id')
         user = User.query.filter_by(firebase_id=firebase_id).first()
         
         if not user:
@@ -1030,6 +1161,37 @@ def get_enhanced_recommendations_route():
 
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
+    try:
+        query_text = request.args.get('q', '').strip()
+        if not query_text:
+            return jsonify({"error": "Search query cannot be empty"}), 400
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        # Filter + paginate schemes to limit load
+        base_query = Scheme.query.order_by(Scheme.scheme_name)
+        pagination = base_query.paginate(page=page, per_page=per_page, error_out=False)
+        schemes = pagination.items
+
+        # NLP-enhanced search only on current page schemes
+        results = search_schemes_nlp(query_text, schemes)
+
+        return jsonify({
+            "query": query_text,
+            "schemes": results,
+            "pagination": {
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "total_items": pagination.total,
+                "total_pages": pagination.pages,
+                "has_next": pagination.has_next,
+                "has_prev": pagination.has_prev
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
     try:
         query_text = request.args.get('q', '')
         if not query_text or len(query_text.strip()) == 0:
