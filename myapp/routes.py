@@ -1213,64 +1213,35 @@ def search_schemes_enhanced():
         per_page = request.args.get('per_page', 10, type=int)
 
         # Categories and synonyms
-        categories = ['Health',
-              'Insurance',
-              'Employment',
-              'Agriculture',
-              'Housing',
-              'Financial Assistance',
-              'Safety',
-              'Subsidy',
-              'Education',
-              'Pension',
-              'Business',
-              'Loan']
+        categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing',
+                      'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension',
+                      'Business', 'Loan']
 
         synonyms = {
-            "medical": "Health",
-            "hospital": "Health",
-            "doctor": "Health",
-            "crop": "Agriculture",
-            "farmer": "Agriculture",
-            "farming": "Agriculture",
-            "home": "Housing",
-            "residence": "Housing",
-            "rent": "Housing",
-            "financial": "Financial assistance",
-            "money": "Financial assistance",
+            "medical": "Health", "hospital": "Health", "doctor": "Health",
+            "crop": "Agriculture", "farmer": "Agriculture", "farming": "Agriculture",
+            "home": "Housing", "residence": "Housing", "rent": "Housing",
+            "financial": "Financial assistance", "money": "Financial assistance",
             "loan": "Loan",
-            "student": "Education",
-            "college": "Education",
-            "school": "Education",
-            "teacher": "Education",
-            "pensioner": "Pension",
-            "retired": "Pension",
-            "business": "Business",
-            "startup": "Business",
-            "insurance": "Insurance",
-            "premium": "Insurance",
-            "job": "Employment",
-            "employment": "Employment",
-            "unemployed": "Employment",
-            "protection": "Safety",
-            "violence": "Safety",
-            "assistance": "Financial assistance",
-            "grant": "Subsidy",
-            "subsidy": "Subsidy"
+            "student": "Education", "college": "Education", "school": "Education", "teacher": "Education",
+            "pensioner": "Pension", "retired": "Pension",
+            "business": "Business", "startup": "Business",
+            "insurance": "Insurance", "premium": "Insurance",
+            "job": "Employment", "employment": "Employment", "unemployed": "Employment",
+            "protection": "Safety", "violence": "Safety",
+            "assistance": "Financial assistance", "grant": "Subsidy", "subsidy": "Subsidy"
         }
 
-        # Category detection
         matched_categories = detect_categories_from_query(query_text, categories, synonyms)
-
-        # Extract NLP filters
         filters = detect_filters_from_query(query_text)
+
         residence_type = filters['residence_type']
         gender = filters['gender']
         city = filters['city']
         income = filters['income']
         age = filters['age']
 
-        # Build base query
+        # Base query
         scheme_query = Scheme.query
         if matched_categories:
             scheme_query = scheme_query.filter(
@@ -1285,10 +1256,10 @@ def search_schemes_enhanced():
         if income is not None:
             scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
 
-        # --- Age Range Filtering ---
+        # Age filter logic
         def scheme_matches_age(user_age, age_range_str):
             if not age_range_str or not isinstance(age_range_str, str):
-                return True  # No restriction
+                return True
             age_range_str = age_range_str.strip().lower()
             try:
                 if '+' in age_range_str:
@@ -1301,30 +1272,26 @@ def search_schemes_enhanced():
                 return False
             return False
 
-        # Apply age filter manually
         if age is not None:
             all_schemes = scheme_query.all()
             matching_ids = [s.id for s in all_schemes if scheme_matches_age(age, s.age_range)]
             scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
 
-        # Finalize query
         scheme_query = scheme_query.order_by(Scheme.scheme_name)
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # NLP similarity ranking
+        # NLP search
         results = search_schemes_nlp(query_text, schemes)
 
+        # 🔁 Fallback if NLP returns nothing
         if not results:
-            fallback_matches = Scheme.query.filter(
-                or_(
-                    Scheme.scheme_name.ilike(f"%{query_text}%"),
-                    Scheme.description.ilike(f"%{query_text}%"),
-                    Scheme.keywords.ilike(f"%{query_text}%"),
-                    Scheme.benefit_type.ilike(f"%{query_text}%"),
-                    Scheme.department.ilike(f"%{query_text}%")
-                )
-            ).limit(10).all()
+            fallback_matches = [
+                s for s in schemes
+                if any(cat.lower() in (s.category or "").lower() for cat in matched_categories)
+                or query_text.lower() in (s.description or "").lower()
+                or query_text.lower() in (s.keywords or "")
+            ]
 
             for scheme in fallback_matches:
                 results.append({
@@ -1339,13 +1306,7 @@ def search_schemes_enhanced():
         return jsonify({
             "query": query_text,
             "detected_categories": matched_categories,
-            "detected_filters": {
-                "residence_type": residence_type,
-                "gender": gender,
-                "city": city,
-                "income": income,
-                "age": age
-            },
+            "detected_filters": filters,
             "schemes": results,
             "pagination": {
                 "page": pagination.page,
