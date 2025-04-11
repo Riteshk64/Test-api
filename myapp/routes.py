@@ -214,7 +214,7 @@ def search_schemes_nlp(query_text, schemes, max_results=20):
             scheme_embedding.reshape(1, -1)
         )[0][0]
 
-        if similarity > 0.3:
+        if similarity >= 0.2:
             results.append({
                 "id": scheme.id,
                 "scheme_name": scheme.scheme_name,
@@ -1314,6 +1314,27 @@ def search_schemes_enhanced():
 
         # NLP similarity ranking
         results = search_schemes_nlp(query_text, schemes)
+
+        if not results:
+            fallback_matches = Scheme.query.filter(
+                or_(
+                    Scheme.scheme_name.ilike(f"%{query_text}%"),
+                    Scheme.description.ilike(f"%{query_text}%"),
+                    Scheme.keywords.ilike(f"%{query_text}%"),
+                    Scheme.benefit_type.ilike(f"%{query_text}%"),
+                    Scheme.department.ilike(f"%{query_text}%")
+                )
+            ).limit(10).all()
+
+            for scheme in fallback_matches:
+                results.append({
+                    "id": scheme.id,
+                    "scheme_name": scheme.scheme_name,
+                    "category": scheme.category,
+                    "description": scheme.description,
+                    "similarity": 0.0,
+                    "keywords": extract_keywords(scheme.description, 3)
+                })
 
         return jsonify({
             "query": query_text,
