@@ -8,6 +8,7 @@ import base64
 import spacy
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import re
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark
@@ -290,6 +291,59 @@ def detect_categories_from_query(query_text, category_list, synonym_map):
     return list(matched_categories)
 
 def detect_filters_from_query(query_text):
+    """Extract gender, residence_type, city, income, age from query"""
+    doc = nlp(query_text.lower())
+    residence_options = {'rural', 'urban', 'semi-urban'}
+    gender_options = {'male', 'female', 'other'}
+
+    filters = {
+        'residence_type': None,
+        'gender': None,
+        'city': None,
+        'income': None,
+        'age': None
+    }
+
+    # --- Gender & Residence Detection ---
+    for token in doc:
+        lemma = token.lemma_.lower()
+        if lemma in residence_options:
+            filters['residence_type'] = lemma
+        elif lemma in gender_options:
+            filters['gender'] = lemma
+
+    # --- City Detection from DB ---
+    known_cities = {row.city.lower() for row in db.session.query(Scheme.city).distinct() if row.city}
+    for token in doc:
+        if token.text.lower() in known_cities:
+            filters['city'] = token.text
+            break
+
+    # --- Income Detection ---
+    income_match = re.search(r'(under|below|less than)\s+(\d+[,\d]*)', query_text.lower())
+    if income_match:
+        try:
+            amount = income_match.group(2).replace(',', '')
+            filters['income'] = float(amount)
+        except:
+            pass
+
+    # --- Age Detection via patterns ---
+    age_match = re.search(r'(age\s)?(above|over|older than)?\s*(\d{1,3})\s*(year|yo)?', query_text.lower())
+    if age_match:
+        try:
+            filters['age'] = int(age_match.group(3))
+        except:
+            pass
+
+    # --- Age Detection via keywords ---
+    if 'senior citizen' in query_text.lower():
+        filters['age'] = 60
+    elif 'youth' in query_text.lower():
+        filters['age'] = 25  # average within "18 to 35"
+
+    return filters
+
     """Extract gender, residence_type, and city from query"""
     doc = nlp(query_text.lower())
 
@@ -319,6 +373,32 @@ def detect_filters_from_query(query_text):
             break
 
     return filters
+
+def scheme_matches_age(age, age_range_str):
+    if not age_range_str or not isinstance(age_range_str, str):
+        return True  # No restriction
+
+    try:
+        age_range_str = age_range_str.strip().lower()
+
+        if '+' in age_range_str:
+            min_age = int(age_range_str.replace('+', '').strip())
+            return age >= min_age
+
+        if 'to' in age_range_str:
+            parts = age_range_str.split('to')
+            if len(parts) == 2:
+                min_age = int(parts[0].strip())
+                max_age = int(parts[1].strip())
+                return min_age <= age <= max_age
+
+        if age_range_str.isdigit():
+            return age == int(age_range_str)
+
+    except Exception:
+        return False  # If parsing fails, exclude it
+
+    return False
 
 # --------------------- User Routes ---------------------
 
@@ -1204,37 +1284,70 @@ def search_schemes_enhanced():
             "residence": "Housing"
         }
 
-        # NLP-based category detection
+        # Category detection
         matched_categories = detect_categories_from_query(query_text, categories, synonyms)
 
+        # Extract NLP filters
         filters = detect_filters_from_query(query_text)
         residence_type = filters['residence_type']
         gender = filters['gender']
         city = filters['city']
+        income = filters['income']
+        age = filters['age']
 
-        # Filter schemes based on matched categories
+        # Build base query
+        scheme_query = Scheme.query
         if matched_categories:
-            scheme_query = Scheme.query.filter(Scheme.category.in_(matched_categories)).order_by(Scheme.scheme_name)
-        else:
-            scheme_query = Scheme.query.order_by(Scheme.scheme_name)
-        
+            scheme_query = scheme_query.filter(Scheme.category.in_(matched_categories))
         if residence_type:
             scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
         if gender:
             scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
         if city:
             scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
+        if income is not None:
+            scheme_query = scheme_query.filter(or_(Scheme.income >= income, Scheme.income == None))
 
+        # --- Age Range Filtering ---
+        def scheme_matches_age(user_age, age_range_str):
+            if not age_range_str or not isinstance(age_range_str, str):
+                return True  # No restriction
+            age_range_str = age_range_str.strip().lower()
+            try:
+                if '+' in age_range_str:
+                    min_age = int(age_range_str.replace('+', '').strip())
+                    return user_age >= min_age
+                if 'to' in age_range_str:
+                    min_age, max_age = map(int, age_range_str.split('to'))
+                    return min_age <= user_age <= max_age
+            except:
+                return False
+            return False
 
+        # Apply age filter manually
+        if age is not None:
+            all_schemes = scheme_query.all()
+            matching_ids = [s.id for s in all_schemes if scheme_matches_age(age, s.age_range)]
+            scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
+
+        # Finalize query
+        scheme_query = scheme_query.order_by(Scheme.scheme_name)
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # NLP similarity ranking (on page results)
+        # NLP similarity ranking
         results = search_schemes_nlp(query_text, schemes)
 
         return jsonify({
             "query": query_text,
             "detected_categories": matched_categories,
+            "detected_filters": {
+                "residence_type": residence_type,
+                "gender": gender,
+                "city": city,
+                "income": income,
+                "age": age
+            },
             "schemes": results,
             "pagination": {
                 "page": pagination.page,
