@@ -244,7 +244,7 @@ def normalize_number_phrase(text):
 
     return None
 
-def detect_filters_from_query(query_text)
+def detect_filters_from_query(query_text):
     """Extract gender, residence_type, city, income, and age from query"""
     doc = nlp(query_text.lower())
     residence_options = {'rural', 'urban', 'semi-urban'}
