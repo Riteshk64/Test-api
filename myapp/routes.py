@@ -1021,7 +1021,7 @@ def search_schemes_enhanced():
             "medical": "Health", "hospital": "Health", "doctor": "Health",
             "crop": "Agriculture", "farmer": "Agriculture", "farming": "Agriculture",
             "home": "Housing", "residence": "Housing", "rent": "Housing",
-            "financial": "Financial assistance", "money": "Financial assistance",
+            "financial": "Financial Assistance", "money": "Financial Assistance",
             "loan": "Loan",
             "student": "Education", "college": "Education", "school": "Education", "teacher": "Education",
             "pensioner": "Pension", "retired": "Pension",
@@ -1029,33 +1029,36 @@ def search_schemes_enhanced():
             "insurance": "Insurance", "premium": "Insurance",
             "job": "Employment", "employment": "Employment", "unemployed": "Employment",
             "protection": "Safety", "violence": "Safety",
-            "assistance": "Financial assistance", "grant": "Subsidy", "subsidy": "Subsidy"
+            "assistance": "Financial Assistance", "grant": "Subsidy", "subsidy": "Subsidy"
         }
 
+        # NLP detection
         matched_categories = detect_categories_from_query(query_text, categories, synonyms)
         filters = detect_filters_from_query(query_text)
 
-        residence_type = filters['residence_type']
-        gender = filters['gender']
-        city = filters['city']
-        income = filters['income']
-        age = filters['age']
-
-        # Base query
-        scheme_query = Scheme.query
-        # Combine NLP + manual categories
+        # Manual overrides
         manual_category = request.args.get('category')
-        combined_categories = matched_categories.copy()
+        residence_type = request.args.get('residence_type', filters['residence_type'])
+        gender = request.args.get('gender', filters['gender'])
+        city = request.args.get('city', filters['city'])
+        income = request.args.get('income', type=float) or filters['income']
+        age = request.args.get('age', type=int) or filters['age']
 
+        # Combine NLP + manual categories
+        combined_categories = matched_categories.copy()
         if manual_category and manual_category not in combined_categories:
             combined_categories.append(manual_category)
 
-        # Apply OR filter on combined categories
+        # Base query
+        scheme_query = Scheme.query
+
+        # Category filter (OR logic)
         if combined_categories:
             scheme_query = scheme_query.filter(
                 or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
 
+        # Apply other filters
         if residence_type:
             scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
         if gender:
@@ -1065,27 +1068,28 @@ def search_schemes_enhanced():
         if income is not None:
             scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
 
+        # Manual age filter post-query
         if age is not None:
             all_schemes = scheme_query.all()
             matching_ids = [s.id for s in all_schemes if scheme_matches_age(age, s.age_range)]
             scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
 
+        # Pagination
         scheme_query = scheme_query.order_by(Scheme.scheme_name)
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # NLP search
+        # NLP search on filtered schemes
         results = search_schemes_nlp(query_text, schemes)
 
-        # Fallback if NLP returns nothing
+        # Fallback: keyword match
         if not results:
             fallback_matches = [
                 s for s in schemes
-                if any(cat.lower() in (s.category or "").lower() for cat in matched_categories)
+                if any(cat.lower() in (s.category or "").lower() for cat in combined_categories)
                 or query_text.lower() in (s.description or "").lower()
                 or query_text.lower() in (s.keywords or "")
             ]
-
             for scheme in fallback_matches:
                 results.append({
                     "id": scheme.id,
@@ -1100,6 +1104,14 @@ def search_schemes_enhanced():
             "query": query_text,
             "detected_categories": matched_categories,
             "detected_filters": filters,
+            "applied_filters": {
+                "category": combined_categories,
+                "residence_type": residence_type,
+                "gender": gender,
+                "city": city,
+                "income": income,
+                "age": age
+            },
             "schemes": results,
             "pagination": {
                 "page": pagination.page,
