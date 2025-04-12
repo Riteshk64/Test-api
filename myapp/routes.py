@@ -1037,7 +1037,7 @@ def search_schemes_enhanced():
         filters = detect_filters_from_query(query_text)
 
         # Manual overrides
-        manual_category = request.args.get('category')
+        manual_category_raw = request.args.get('category')
         residence_type = request.args.get('residence_type', filters['residence_type'])
         gender = request.args.get('gender', filters['gender'])
         city = request.args.get('city', filters['city'])
@@ -1045,9 +1045,11 @@ def search_schemes_enhanced():
         age = request.args.get('age', type=int) or filters['age']
 
         # Combine NLP + manual categories
+        manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
         combined_categories = matched_categories.copy()
-        if manual_category and manual_category not in combined_categories:
-            combined_categories.append(manual_category)
+        for cat in manual_categories:
+            if cat and cat not in combined_categories:
+                combined_categories.append(cat)
 
         # Base query
         scheme_query = Scheme.query
