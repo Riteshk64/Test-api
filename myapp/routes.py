@@ -2,9 +2,6 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from sqlalchemy import or_
 import math
-import os
-import json
-import base64
 import spacy
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -97,25 +94,6 @@ def get_text_embedding(text):
     # Get document vector
     doc = nlp(processed_text)
     return doc.vector
-
-def calculate_text_similarity(text1, text2):
-    """Calculate cosine similarity between two text strings"""
-    if not text1 or not text2:
-        return 0.0
-    
-    vec1 = get_text_embedding(text1)
-    vec2 = get_text_embedding(text2)
-    
-    if vec1 is None or vec2 is None:
-        return 0.0
-    
-    # Reshape vectors for cosine_similarity function
-    vec1 = vec1.reshape(1, -1)
-    vec2 = vec2.reshape(1, -1)
-    
-    # Calculate cosine similarity
-    similarity = cosine_similarity(vec1, vec2)[0][0]
-    return float(similarity)
 
 def extract_keywords(text, num_keywords=5):
     """Extract important keywords from text"""
@@ -266,7 +244,7 @@ def normalize_number_phrase(text):
 
     return None
 
-def detect_filters_from_query(query_text):
+def detect_filters_from_query(query_text)
     """Extract gender, residence_type, city, income, and age from query"""
     doc = nlp(query_text.lower())
     residence_options = {'rural', 'urban', 'semi-urban'}
@@ -297,7 +275,7 @@ def detect_filters_from_query(query_text):
 
     # --- Income Detection ---
     income_match = re.search(
-        r'(under|below|less than)\s+([^\s]+(?:\s*(?:lakh|lakhs|k|crore|thousand))?)',
+        r'(under|below|less than|upto|up to|above|income of|income is|income)\s+([^\s]+(?:\s*(?:lakh|lakhs|k|crore|thousand))?)',
         query_text.lower()
     )
     if income_match:
@@ -799,165 +777,6 @@ def get_scheme(scheme_id):
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
-@api.route('/schemes/search', methods=['GET'])
-def search_schemes():
-    try:
-        # Parse and validate pagination parameters
-        pagination_schema = PaginationParamsSchema()
-        try:
-            pagination_params = pagination_schema.load(request.args)
-        except ValidationError as err:
-            return handle_validation_error(err)
-        
-        page = pagination_params['page']
-        per_page = pagination_params['per_page']
-        
-        # Get search query
-        query_text = request.args.get('q', '')
-        if not query_text or len(query_text.strip()) == 0:
-            return jsonify({"error": "Search query cannot be empty"}), 400
-        
-        # Simple search implementation
-        query = Scheme.query.filter(
-            or_(
-                Scheme.scheme_name.ilike(f'%{query_text}%'),
-                Scheme.description.ilike(f'%{query_text}%'),
-                Scheme.keywords.ilike(f'%{query_text}%'),
-                Scheme.benefit_type.ilike(f'%{query_text}%'),
-                Scheme.department.ilike(f'%{query_text}%')
-            )
-        ).order_by(Scheme.scheme_name)
-        
-        # Paginate results
-        pagination_result = paginate_results(query, page, per_page)
-        schemes = pagination_result['items']
-        
-        # Format response
-        result = []
-        for scheme in schemes:
-            result.append({
-                "id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "benefit_type": scheme.benefit_type,
-                "application_link": scheme.application_link,
-                "department": scheme.department
-            })
-        
-        # Return paginated response
-        return jsonify({
-            "query": query_text,
-            "schemes": result,
-            "pagination": pagination_result['pagination']
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-@api.route('/schemes/unified', methods=['GET'])
-def unified_schemes():
-    try:
-        # Parse and validate pagination parameters
-        pagination_schema = PaginationParamsSchema()
-        try:
-            pagination_params = pagination_schema.load(request.args)
-        except ValidationError as err:
-            return handle_validation_error(err)
-        
-        page = pagination_params['page']
-        per_page = pagination_params['per_page']
-        
-        # Get search query (optional)
-        query_text = request.args.get('q', '').strip()
-        
-        # Get filter parameters (all optional)
-        category = request.args.get('category')
-        gender = request.args.get('gender')
-        residence_type = request.args.get('residence_type')
-        city = request.args.get('city')
-        income = request.args.get('income', type=float)  # Directly use income as parameter
-        
-        # Convert string boolean parameters to actual booleans
-        differently_abled = request.args.get('differently_abled')
-        if differently_abled is not None:
-            differently_abled = differently_abled.lower() == 'true'
-            
-        minority = request.args.get('minority')
-        if minority is not None:
-            minority = minority.lower() == 'true'
-            
-        bpl_category = request.args.get('bpl_category')
-        if bpl_category is not None:
-            bpl_category = bpl_category.lower() == 'true'
-        
-        # Start with base query
-        query = Scheme.query
-        
-        # Apply search if query text is provided
-        if query_text:
-            query = query.filter(
-                or_(
-                    Scheme.scheme_name.ilike(f'%{query_text}%'),
-                    Scheme.description.ilike(f'%{query_text}%'),
-                    Scheme.keywords.ilike(f'%{query_text}%'),
-                    Scheme.benefit_type.ilike(f'%{query_text}%'),
-                    Scheme.department.ilike(f'%{query_text}%')
-                )
-            )
-        
-        # Apply filters if provided
-        if category:
-            query = query.filter(Scheme.category == category)
-        if gender:
-            query = query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
-        if residence_type:
-            query = query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
-        if city:
-            query = query.filter(or_(Scheme.city == city, Scheme.city == None))
-        if income is not None:  # Only filter by income if provided
-            query = query.filter(Scheme.income <= income)
-        if differently_abled is not None:
-            query = query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
-        if minority is not None:
-            query = query.filter(or_(Scheme.minority == minority, Scheme.minority == None))
-        if bpl_category is not None:
-            query = query.filter(or_(Scheme.bpl_category == bpl_category, Scheme.bpl_category == None))
-        
-        # Order by scheme name
-        query = query.order_by(Scheme.scheme_name)
-        
-        # Paginate results
-        pagination_result = paginate_results(query, page, per_page)
-        schemes = pagination_result['items']
-        
-        # Format response
-        result = []
-        for scheme in schemes:
-            result.append({
-                "id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "benefit_type": scheme.benefit_type,
-                "application_link": scheme.application_link,
-                "department": scheme.department,
-                "launch_date": scheme.launch_date.strftime('%Y-%m-%d') if scheme.launch_date else None,
-                "expiry_date": scheme.expiry_date.strftime('%Y-%m-%d') if scheme.expiry_date else None,
-            })
-        
-        # Return paginated response with search query in response if provided
-        response_data = {
-            "schemes": result,
-            "pagination": pagination_result['pagination']
-        }
-        
-        if query_text:
-            response_data["query"] = query_text
-            
-        return jsonify(response_data), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
 # --------------------- Recommendation Routes ---------------------
 
 @api.route('/recommendations', methods=['GET'])
@@ -1183,25 +1002,6 @@ def get_enhanced_recommendations_route():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
-    try:
-        firebase_id = request.args.get('firebase_id')
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-            
-        # Get all schemes - you might want to limit this in production
-        schemes = Scheme.query.all()
-        
-        # Use the NLP-enhanced recommendation function
-        recommendations = get_enhanced_recommendations(user, schemes)
-        
-        return jsonify({
-            "recommendations": recommendations
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
     try:
@@ -1243,10 +1043,19 @@ def search_schemes_enhanced():
 
         # Base query
         scheme_query = Scheme.query
-        if matched_categories:
+        # Combine NLP + manual categories
+        manual_category = request.args.get('category')
+        combined_categories = matched_categories.copy()
+
+        if manual_category and manual_category not in combined_categories:
+            combined_categories.append(manual_category)
+
+        # Apply OR filter on combined categories
+        if combined_categories:
             scheme_query = scheme_query.filter(
-                or_(*[Scheme.category.ilike(f"%{cat}%") for cat in matched_categories])
+                or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
+
         if residence_type:
             scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
         if gender:
@@ -1255,22 +1064,6 @@ def search_schemes_enhanced():
             scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
         if income is not None:
             scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
-
-        # Age filter logic
-        def scheme_matches_age(user_age, age_range_str):
-            if not age_range_str or not isinstance(age_range_str, str):
-                return True
-            age_range_str = age_range_str.strip().lower()
-            try:
-                if '+' in age_range_str:
-                    min_age = int(age_range_str.replace('+', '').strip())
-                    return user_age >= min_age
-                if 'to' in age_range_str:
-                    min_age, max_age = map(int, age_range_str.split('to'))
-                    return min_age <= user_age <= max_age
-            except:
-                return False
-            return False
 
         if age is not None:
             all_schemes = scheme_query.all()
@@ -1284,7 +1077,7 @@ def search_schemes_enhanced():
         # NLP search
         results = search_schemes_nlp(query_text, schemes)
 
-        # 🔁 Fallback if NLP returns nothing
+        # Fallback if NLP returns nothing
         if not results:
             fallback_matches = [
                 s for s in schemes
