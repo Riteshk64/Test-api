@@ -2,8 +2,9 @@ import os
 
 from flask import Flask 
 
-from .extensions import db
+from .extensions import db, migrate
 from .routes import api
+from . import models
 
 def create_app():
     app = Flask(__name__)
@@ -12,6 +13,7 @@ def create_app():
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
     app.register_blueprint(api)
 

@@ -54,6 +54,7 @@ class Scheme(db.Model):
     education_criteria = db.Column(db.String(255), nullable=True)  # Specific education requirements
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
     embedding = db.Column(BYTEA, nullable=True)
+    average_rating = db.Column(db.Float, nullable=False, default=0.0)
     
     # Optional fields for multilingual support
     description_marathi = db.Column(db.Text, nullable=True)
@@ -72,3 +73,16 @@ class UserBookmark(db.Model):
     
     # Ensure a user can bookmark a scheme only once
     _table_args_ = (db.UniqueConstraint('user_id', 'scheme_id', name='unique_user_scheme_bookmark'),)
+
+class SchemeRating(db.Model):
+    __tablename__ = 'scheme_ratings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    scheme_id = db.Column(db.Integer, db.ForeignKey('scheme.id'), nullable=False)
+    rating = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'scheme_id', name='unique_user_scheme_rating'),
+    )

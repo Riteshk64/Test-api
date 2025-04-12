@@ -199,7 +199,8 @@ def search_schemes_nlp(query_text, schemes, max_results=20):
                 "category": scheme.category,
                 "description": scheme.description,
                 "similarity": float(similarity),
-                "keywords": extract_keywords(scheme.description, 3)
+                "keywords": extract_keywords(scheme.description, 3),
+                "average_rating": round(scheme.average_rating or 0.0, 2),
             })
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
@@ -727,6 +728,7 @@ def get_schemes():
                 "department": scheme.department,
                 "launch_date": scheme.launch_date.strftime('%Y-%m-%d') if scheme.launch_date else None,
                 "expiry_date": scheme.expiry_date.strftime('%Y-%m-%d') if scheme.expiry_date else None,
+                "average_rating": scheme.average_rating or 0.0,
             })
         
         # Return paginated response
@@ -1099,7 +1101,8 @@ def search_schemes_enhanced():
                     "category": scheme.category,
                     "description": scheme.description,
                     "similarity": 0.0,
-                    "keywords": extract_keywords(scheme.description, 3)
+                    "keywords": extract_keywords(scheme.description, 3),
+                    "average_rating": round(scheme.average_rating or 0.0, 2)
                 })
 
         return jsonify({
@@ -1127,3 +1130,40 @@ def search_schemes_enhanced():
 
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+# --------------------- Ratings Routes ---------------------
+
+@api.route('/schemes/<int:scheme_id>/rate', methods=['POST'])
+def rate_scheme(scheme_id):
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        rating = float(data.get('rating'))
+
+        if not (1.0 <= rating <= 5.0):
+            return jsonify({"error": "Rating must be between 1 and 5"}), 400
+
+        # Check if user already rated
+        existing = SchemeRating.query.filter_by(user_id=user_id, scheme_id=scheme_id).first()
+
+        if existing:
+            existing.rating = rating
+        else:
+            new_rating = SchemeRating(user_id=user_id, scheme_id=scheme_id, rating=rating)
+            db.session.add(new_rating)
+
+        db.session.commit()
+
+        # Recalculate average
+        avg = db.session.query(func.avg(SchemeRating.rating))\
+                        .filter_by(scheme_id=scheme_id).scalar() or 0.0
+
+        scheme = Scheme.query.get(scheme_id)
+        scheme.average_rating = round(avg, 2)
+        db.session.commit()
+
+        return jsonify({"message": "Rating submitted", "new_average": scheme.average_rating}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
