@@ -8,7 +8,7 @@ import numpy as np
 import re
 
 from .extensions import db
-from .models import User, Scheme, UserBookmark
+from .models import User, Scheme, UserBookmark, SchemeRating
 from marshmallow import Schema, fields, validate, ValidationError
 
 # Create Blueprint
