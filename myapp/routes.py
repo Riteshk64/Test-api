@@ -6,6 +6,7 @@ import spacy
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import re
+from sqlalchemy.sql import func
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark, SchemeRating
