@@ -707,14 +707,14 @@ def get_scheme(scheme_id):
         
         # Check bookmark status
         firebase_id = request.args.get('firebase_id')
-        is_bookmarked = False
+        is_bookmarked = None
         user_rating = None
 
         if firebase_id:
             user = User.query.filter_by(firebase_id=firebase_id).first()
             if user:
                 bookmark = UserBookmark.query.filter_by(user_id=user.id, scheme_id=scheme.id).first()
-                is_bookmarked = bookmark is not None
+                bookmark_id = bookmark.id if bookmark else None
             
                 rating_entry = SchemeRating.query.filter_by(user_id=user.id, scheme_id=scheme.id).first()
                 if rating_entry:
