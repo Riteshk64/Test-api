@@ -194,6 +194,7 @@ def search_schemes_nlp(query_text, schemes, max_results=20):
         )[0][0]
 
         if similarity >= 0.2:
+            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
             results.append({
                 "id": scheme.id,
                 "scheme_name": scheme.scheme_name,
@@ -202,6 +203,7 @@ def search_schemes_nlp(query_text, schemes, max_results=20):
                 "similarity": float(similarity),
                 "keywords": extract_keywords(scheme.description, 3),
                 "average_rating": round(scheme.average_rating or 0.0, 2),
+                "total_ratings": total_ratings,
             })
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
@@ -719,6 +721,7 @@ def get_schemes():
         # Format response
         result = []
         for scheme in schemes:
+            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
             result.append({
                 "id": scheme.id,
                 "scheme_name": scheme.scheme_name,
@@ -730,6 +733,7 @@ def get_schemes():
                 "launch_date": scheme.launch_date.strftime('%Y-%m-%d') if scheme.launch_date else None,
                 "expiry_date": scheme.expiry_date.strftime('%Y-%m-%d') if scheme.expiry_date else None,
                 "average_rating": scheme.average_rating or 0.0,
+                "total_ratings": total_ratings,
             })
         
         # Return paginated response
@@ -1096,6 +1100,7 @@ def search_schemes_enhanced():
                 or query_text.lower() in (s.keywords or "")
             ]
             for scheme in fallback_matches:
+                total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
                 results.append({
                     "id": scheme.id,
                     "scheme_name": scheme.scheme_name,
@@ -1103,7 +1108,8 @@ def search_schemes_enhanced():
                     "description": scheme.description,
                     "similarity": 0.0,
                     "keywords": extract_keywords(scheme.description, 3),
-                    "average_rating": round(scheme.average_rating or 0.0, 2)
+                    "average_rating": round(scheme.average_rating or 0.0, 2),
+                    "total_ratings": total_ratings,
                 })
 
         return jsonify({
