@@ -708,11 +708,17 @@ def get_scheme(scheme_id):
         # Check bookmark status
         firebase_id = request.args.get('firebase_id')
         is_bookmarked = False
+        user_rating = None
+
         if firebase_id:
             user = User.query.filter_by(firebase_id=firebase_id).first()
             if user:
                 bookmark = UserBookmark.query.filter_by(user_id=user.id, scheme_id=scheme.id).first()
                 is_bookmarked = bookmark is not None
+            
+                rating_entry = SchemeRating.query.filter_by(user_id=user.id, scheme_id=scheme.id).first()
+                if rating_entry:
+                    user_rating = float(rating_entry.rating)
         
         total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
         
@@ -746,6 +752,7 @@ def get_scheme(scheme_id):
             "average_rating": round(scheme.average_rating or 0.0, 2),
             "total_ratings": total_ratings,
             "isBookmarked": is_bookmarked,
+            "user_rating": user_rating
         }
         
         return jsonify(result), 200
