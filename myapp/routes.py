@@ -503,7 +503,10 @@ def create_bookmark():
         # Validate input data
         schema = BookmarkSchema()
         try:
-            bookmark_data = schema.load(data)
+            bookmark_data = schema.load({
+                "scheme_id": data.get("scheme_id"),
+                "notes": data.get("notes")
+            })
         except ValidationError as err:
             return handle_validation_error(err)
         
