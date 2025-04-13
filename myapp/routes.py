@@ -121,52 +121,6 @@ def extract_keywords(text, num_keywords=5):
     sorted_keywords = sorted(keyword_freq.items(), key=lambda x: x[1], reverse=True)
     return [word for word, freq in sorted_keywords[:num_keywords]]
 
-# Enhanced recommendation function that could replace or supplement the existing one
-def get_enhanced_recommendations(user, schemes, max_results=10):
-    """Get NLP + rule-based scheme recommendations using precomputed embeddings."""
-    results = []
-
-    # Create a user profile embedding
-    user_profile = f"{user.gender or ''} {user.age or ''} {user.occupation or ''} {user.city or ''} " \
-                   f"{user.residence_type or ''} {user.education_level or ''} {user.category or ''}"
-    user_embedding = get_text_embedding(user_profile)
-    if user_embedding is None:
-        return []
-
-    for scheme in schemes:
-        if not scheme.embedding:
-            continue  # Skip if embedding not stored
-
-        # Load embedding from DB
-        try:
-            scheme_embedding = np.frombuffer(scheme.embedding, dtype=np.float32)
-        except Exception:
-            continue
-
-        semantic_score = cosine_similarity(
-            user_embedding.reshape(1, -1),
-            scheme_embedding.reshape(1, -1)
-        )[0][0]
-
-        rule_score = calculate_match_score(user, scheme)
-        rule_score_numeric = {"High": 1.0, "Medium": 0.6, "Low": 0.3}[rule_score]
-
-        combined_score = 0.7 * rule_score_numeric + 0.3 * semantic_score
-
-        results.append({
-            "id": scheme.id,
-            "scheme_name": scheme.scheme_name,
-            "category": scheme.category,
-            "description": scheme.description,
-            "semantic_score": float(semantic_score),
-            "rule_score": rule_score,
-            "combined_score": float(combined_score),
-            "keywords": extract_keywords(scheme.description, 3)
-        })
-
-    results.sort(key=lambda x: x["combined_score"], reverse=True)
-    return results[:max_results]
-
 # Enhanced search function with NLP
 def search_schemes_nlp(query_text, schemes, max_results=20):
     """Search schemes using precomputed embeddings and semantic similarity."""
@@ -787,7 +741,28 @@ def get_scheme(scheme_id):
 # --------------------- Recommendation Routes ---------------------
 
 @api.route('/recommendations', methods=['GET'])
-def get_recommendations():
+def get_top_rated_schemes():
+    try:
+        top_schemes = Scheme.query.order_by(Scheme.average_rating.desc().nullslast()).limit(5).all()
+
+        result = []
+        for scheme in top_schemes:
+            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+            result.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "average_rating": scheme.average_rating or 0.0,
+                "total_ratings": total_ratings,
+                "department": scheme.department,
+                "benefit_type": scheme.benefit_type
+            })
+
+        return jsonify({"top_rated_schemes": result}), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
     try:
         # Parse and validate pagination parameters
         pagination_schema = PaginationParamsSchema()
@@ -860,151 +835,6 @@ def get_recommendations():
         return jsonify({
             "recommendations": result,
             "pagination": pagination_result['pagination']
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-def calculate_match_score(user, scheme):
-    """Calculate how well a scheme matches a user profile"""
-    score = 0
-    total_criteria = 0
-    
-    # Match gender
-    if scheme.gender is not None:
-        total_criteria += 1
-        if user.gender == scheme.gender:
-            score += 1
-    
-    # Match residence type
-    if scheme.residence_type is not None:
-        total_criteria += 1
-        if user.residence_type == scheme.residence_type:
-            score += 1
-    
-    # Match city
-    if scheme.city is not None:
-        total_criteria += 1
-        if user.city == scheme.city:
-            score += 1
-    
-    # Match income
-    if scheme.income is not None and user.income is not None:
-        total_criteria += 1
-        if user.income <= scheme.income:
-            score += 1
-    
-    # Match differently_abled status
-    if scheme.differently_abled is not None:
-        total_criteria += 1
-        if user.differently_abled == scheme.differently_abled:
-            score += 1
-    
-    # Match minority status
-    if scheme.minority is not None:
-        total_criteria += 1
-        if user.minority == scheme.minority:
-            score += 1
-    
-    # Match BPL category
-    if scheme.bpl_category is not None:
-        total_criteria += 1
-        if user.bpl_category == scheme.bpl_category:
-            score += 1
-    
-    # Match occupation
-    if scheme.occupation is not None:
-        total_criteria += 1
-        if user.occupation == scheme.occupation:
-            score += 1
-    
-    # Match marital status
-    if scheme.marital_status is not None:
-        total_criteria += 1
-        if user.marital_status == scheme.marital_status:
-            score += 1
-    
-    # Match caste/category
-    if scheme.caste is not None:
-        total_criteria += 1
-        if user.category == scheme.caste:
-            score += 1
-    
-    # Calculate age if dob is available and scheme has age criteria
-    if user.dob and scheme.age_range:
-        total_criteria += 1
-        try:
-            today = datetime.now().date()
-            age = today.year - user.dob.year - ((today.month, today.day) < (user.dob.month, user.dob.day))
-            
-            age_min, age_max = map(int, scheme.age_range.split('-'))
-            if age_min <= age <= age_max:
-                score += 1
-        except (ValueError, AttributeError):
-            # If age range format is incorrect, ignore this criterion
-            total_criteria -= 1
-    
-    # Calculate percentage match
-    match_percentage = (score / total_criteria * 100) if total_criteria > 0 else 0
-    
-    # Return match label based on percentage
-    if match_percentage >= 80:
-        return "High"
-    elif match_percentage >= 50:
-        return "Medium"
-    else:
-        return "Low"
-
-@api.route('/recommendations/enhanced', methods=['GET'])
-def get_enhanced_recommendations_route():
-    try:
-        firebase_id = request.args.get('firebase_id')
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
-
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        # Compute age inline if dob is available
-        user.age = None
-        if user.dob:
-            today = datetime.today().date()
-            user.age = today.year - user.dob.year - ((today.month, today.day) < (user.dob.month, user.dob.day))
-
-        # Apply basic filters
-        query = Scheme.query
-        if user.gender:
-            query = query.filter(or_(Scheme.gender == user.gender, Scheme.gender == None))
-        if user.residence_type:
-            query = query.filter(or_(Scheme.residence_type == user.residence_type, Scheme.residence_type == None))
-        if user.city:
-            query = query.filter(or_(Scheme.city == user.city, Scheme.city == None))
-        if user.income is not None:
-            query = query.filter(or_(Scheme.income >= user.income, Scheme.income == None))
-        if user.differently_abled is not None:
-            query = query.filter(or_(Scheme.differently_abled == user.differently_abled, Scheme.differently_abled == None))
-        if user.minority is not None:
-            query = query.filter(or_(Scheme.minority == user.minority, Scheme.minority == None))
-        if user.bpl_category is not None:
-            query = query.filter(or_(Scheme.bpl_category == user.bpl_category, Scheme.bpl_category == None))
-
-        # Use pagination instead of query.all()
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-        schemes = pagination.items
-
-        # Generate recommendations only for current page
-        recommendations = get_enhanced_recommendations(user, schemes)
-
-        return jsonify({
-            "recommendations": recommendations,
-            "pagination": {
-                "page": pagination.page,
-                "per_page": pagination.per_page,
-                "total_items": pagination.total,
-                "total_pages": pagination.pages,
-                "has_next": pagination.has_next,
-                "has_prev": pagination.has_prev
-            }
         }), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
