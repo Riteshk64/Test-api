@@ -456,8 +456,8 @@ def get_bookmarks():
         page = pagination_params['page']
         per_page = pagination_params['per_page']
         
-        firebase_id = request.args.get('firebase_id')
-        user = User.query.filter_by(firebase_id=firebase_id).first()
+        user_id = request.args.get('user_id', type=int)
+        user = User.query.get(user_id)
         if not user:
             return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
         
@@ -710,7 +710,7 @@ def get_scheme(scheme_id):
         
         # Check bookmark status
         firebase_id = request.args.get('firebase_id')
-        is_bookmarked = None
+        bookmark_id = None
         user_rating = None
 
         if firebase_id:
@@ -754,7 +754,7 @@ def get_scheme(scheme_id):
             "keywords": scheme.keywords,
             "average_rating": round(scheme.average_rating or 0.0, 2),
             "total_ratings": total_ratings,
-            "isBookmarked": is_bookmarked,
+            "bookmark_id": bookmark_id,
             "user_rating": user_rating
         }
         
