@@ -705,6 +705,17 @@ def get_scheme(scheme_id):
         if not scheme:
             return jsonify({"error": f"Scheme with ID {scheme_id} not found"}), 404
         
+        # Check bookmark status
+        firebase_id = request.args.get('firebase_id')
+        is_bookmarked = False
+        if firebase_id:
+            user = User.query.filter_by(firebase_id=firebase_id).first()
+            if user:
+                bookmark = UserBookmark.query.filter_by(user_id=user.id, scheme_id=scheme.id).first()
+                is_bookmarked = bookmark is not None
+        
+        total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+        
         # Format response
         result = {
             "id": scheme.id,
@@ -731,7 +742,10 @@ def get_scheme(scheme_id):
             "scheme_details": scheme.scheme_details,
             "local_body": scheme.local_body,
             "education_criteria": scheme.education_criteria,
-            "keywords": scheme.keywords
+            "keywords": scheme.keywords,
+            "average_rating": round(scheme.average_rating or 0.0, 2),
+            "total_ratings": total_ratings,
+            "isBookmarked": is_bookmarked,
         }
         
         return jsonify(result), 200
