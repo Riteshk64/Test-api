@@ -881,6 +881,27 @@ def search_schemes_enhanced():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
 
+        # If query is empty, return all schemes
+        if not query_text:
+            query = Scheme.query
+            pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+            schemes = pagination.items
+            result = [
+                {
+                    "id": scheme.id,
+                    "scheme_name": scheme.scheme_name,
+                    "category": scheme.category,
+                    "description": scheme.description,
+                    "average_rating": round(scheme.average_rating or 0.0, 2),
+                    "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+                }
+                for scheme in schemes
+            ]
+            return jsonify({
+                "schemes": result,
+                "pagination": pagination
+            }), 200
+
         # Manual filters
         manual_category_raw = request.args.get('category')
         residence_type = request.args.get('residence_type')
@@ -964,7 +985,6 @@ def search_schemes_enhanced():
 
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
 
 # --------------------- Ratings Routes ---------------------
 
