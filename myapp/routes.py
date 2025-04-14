@@ -898,27 +898,27 @@ def search_schemes_enhanced():
                       'Business', 'Loan']
 
         synonyms = {
-            "medical": "Health", "hospital": "Health", "doctor": "Health",
-            "crop": "Agriculture", "farmer": "Agriculture", "farming": "Agriculture",
-            "home": "Housing", "residence": "Housing", "rent": "Housing",
-            "financial": "Financial Assistance", "money": "Financial Assistance",
-            "loan": "Loan",
-            "student": "Education", "college": "Education", "school": "Education", "teacher": "Education",
-            "pensioner": "Pension", "retired": "Pension",
-            "business": "Business", "startup": "Business",
-            "insurance": "Insurance", "premium": "Insurance",
-            "job": "Employment", "employment": "Employment", "unemployed": "Employment",
-            "protection": "Safety", "violence": "Safety",
-            "assistance": "Financial Assistance", "grant": "Subsidy", "subsidy": "Subsidy"
+            "money": "Financial Assistance", 
+            "financial": "Financial Assistance", 
+            "loan": "Loan", 
+            "grant": "Subsidy", 
+            "student": "Education", 
+            "employment": "Employment", 
+            "health": "Health", 
+            # Add other synonyms here
         }
 
-        # If query_text exists, apply category and filter detection
+        # Detect category from query text
         matched_categories = detect_categories_from_query(query_text, categories, synonyms) if query_text else []
-        filters_from_query = detect_filters_from_query(query_text) if query_text else {}
+        filters_from_query = detect_filters_from_query(query_text) if query_text else []
 
         # Combine NLP detected categories with manual categories
         manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
         combined_categories = list(set(matched_categories + manual_categories))
+
+        # If no category is detected, apply the filter as empty.
+        if not combined_categories:
+            combined_categories = []
 
         # Fallback to detected filters if manual filters aren't provided
         residence_type = residence_type or filters_from_query.get('residence_type')
@@ -939,7 +939,7 @@ def search_schemes_enhanced():
                 or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
 
-        # Apply filters
+        # Apply other filters
         if gender:
             scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
         if residence_type:
@@ -965,36 +965,19 @@ def search_schemes_enhanced():
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # Fuzzy matching for name if query_text exists
-        if query_text:
-            results = [
-                {
-                    "id": scheme.id,
-                    "scheme_name": scheme.scheme_name,
-                    "category": scheme.category,
-                    "description": scheme.description,
-                    "similarity": 1.0 if match_scheme_name(query_text, scheme.scheme_name) else 0.0,
-                    "keywords": extract_keywords(scheme.description, 3),
-                    "average_rating": round(scheme.average_rating or 0.0, 2),
-                    "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
-                }
-                for scheme in schemes
-                if match_scheme_name(query_text, scheme.scheme_name)  # Fuzzy matching for scheme name
-            ]
-        else:
-            # If the query is empty, return all schemes with applied filters
-            results = [
-                {
-                    "id": scheme.id,
-                    "scheme_name": scheme.scheme_name,
-                    "category": scheme.category,
-                    "description": scheme.description,
-                    "keywords": extract_keywords(scheme.description, 3),
-                    "average_rating": round(scheme.average_rating or 0.0, 2),
-                    "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
-                }
-                for scheme in schemes
-            ]
+        # If the query is empty, return all schemes with applied filters
+        results = [
+            {
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "keywords": extract_keywords(scheme.description, 3),
+                "average_rating": round(scheme.average_rating or 0.0, 2),
+                "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
+            }
+            for scheme in schemes
+        ]
 
         return jsonify({
             "query": query_text,
