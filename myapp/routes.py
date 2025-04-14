@@ -449,7 +449,10 @@ def get_bookmarks():
         # Parse and validate pagination parameters
         pagination_schema = PaginationParamsSchema()
         try:
-            pagination_params = pagination_schema.load(request.args)
+            pagination_params = pagination_schema.load({
+            "page": request.args.get("page", type=int),
+            "per_page": request.args.get("per_page", type=int)
+        })
         except ValidationError as err:
             return handle_validation_error(err)
         
