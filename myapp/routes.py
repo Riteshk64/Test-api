@@ -474,6 +474,7 @@ def get_bookmarks():
         result = []
         for bookmark in bookmarks:
             scheme = bookmark.scheme
+            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
             result.append({
                 "bookmark_id": bookmark.id,
                 "scheme_id": scheme.id,
@@ -481,7 +482,9 @@ def get_bookmarks():
                 "category": scheme.category,
                 "description": scheme.description,
                 "bookmarked_at": bookmark.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                "notes": bookmark.notes
+                "notes": bookmark.notes,
+                "total_ratings": total_ratings,
+                "average_rating": round(scheme.average_rating or 0.0, 2),
             })
         
         # Return paginated response
