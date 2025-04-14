@@ -869,6 +869,14 @@ def get_top_rated_schemes():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
+from flask import Blueprint, request, jsonify
+from sqlalchemy import or_
+from fuzzywuzzy import fuzz
+from .models import Scheme, SchemeRating
+from .utils import detect_categories_from_query, detect_filters_from_query, search_schemes_nlp, extract_keywords
+
+api = Blueprint('api', __name__)
+
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
     try:
@@ -963,21 +971,24 @@ def search_schemes_enhanced():
         schemes = pagination.items
 
         # NLP similarity if query is provided
+        results = []
         if query_text:
             results = search_schemes_nlp(query_text, schemes)
-        else:
-            results = []
 
         # Fallback if NLP match fails: include name-based matching
         if not results:
             for scheme in schemes:
                 total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
-                
+
                 # Check if the name contains the query text
                 name_similarity = 0.0
                 if query_text.lower() in scheme.scheme_name.lower():
                     name_similarity = 1.0  # Exact match will give max score
+                else:
+                    # Fuzzy matching for partial matches
+                    name_similarity = fuzz.partial_ratio(query_text.lower(), scheme.scheme_name.lower()) / 100.0
 
+                # Append the result with similarity score
                 results.append({
                     "id": scheme.id,
                     "scheme_name": scheme.scheme_name,
