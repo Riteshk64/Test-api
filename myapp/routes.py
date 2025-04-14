@@ -870,8 +870,6 @@ def get_top_rated_schemes():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
-api = Blueprint('api', __name__)
-
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
     try:
@@ -965,35 +963,26 @@ def search_schemes_enhanced():
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # NLP similarity if query is provided
-        results = []
+        # Direct name-based matching
         if query_text:
-            results = search_schemes_nlp(query_text, schemes)
-
-        # Fallback if NLP match fails: include name-based matching
-        if not results:
-            for scheme in schemes:
-                total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
-
-                # Check if the name contains the query text
-                name_similarity = 0.0
-                if query_text.lower() in scheme.scheme_name.lower():
-                    name_similarity = 1.0  # Exact match will give max score
-                else:
-                    # Fuzzy matching for partial matches
-                    name_similarity = fuzz.partial_ratio(query_text.lower(), scheme.scheme_name.lower()) / 100.0
-
-                # Append the result with similarity score
-                results.append({
+            results = [
+                {
                     "id": scheme.id,
                     "scheme_name": scheme.scheme_name,
                     "category": scheme.category,
                     "description": scheme.description,
-                    "similarity": name_similarity,
+                    "similarity": 1.0 if query_text.lower() in scheme.scheme_name.lower() else 0.0,
                     "keywords": extract_keywords(scheme.description, 3),
                     "average_rating": round(scheme.average_rating or 0.0, 2),
-                    "total_ratings": total_ratings,
-                })
+                    "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
+                }
+                for scheme in schemes
+                if query_text.lower() in scheme.scheme_name.lower()  # Direct match for scheme name
+            ]
+
+        # If no results from direct name match, fallback to NLP
+        if not results and query_text:
+            results = search_schemes_nlp(query_text, schemes)
 
         return jsonify({
             "query": query_text,
@@ -1023,7 +1012,6 @@ def search_schemes_enhanced():
 
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
 # --------------------- Ratings Routes ---------------------
 
 @api.route('/schemes/<int:scheme_id>/rate', methods=['POST'])
