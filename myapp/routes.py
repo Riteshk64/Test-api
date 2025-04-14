@@ -890,6 +890,7 @@ def search_schemes_enhanced():
         if bpl_category is not None:
             bpl_category = bpl_category.lower() == 'true'
 
+        # Categories + NLP synonym mapping
         categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing',
                       'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension',
                       'Business', 'Loan']
@@ -912,11 +913,11 @@ def search_schemes_enhanced():
         matched_categories = detect_categories_from_query(query_text, categories, synonyms) if query_text else []
         filters_from_query = detect_filters_from_query(query_text) if query_text else {}
 
-        # Combine NLP + manual
+        # Combine NLP + manual filters
         manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
         combined_categories = list(set(matched_categories + manual_categories))
 
-        # Fallback to NLP-detected filters only if not manually overridden
+        # NLP fallback values if manual not provided
         residence_type = residence_type or filters_from_query.get('residence_type')
         gender = gender or filters_from_query.get('gender')
         city = city or filters_from_query.get('city')
@@ -925,13 +926,13 @@ def search_schemes_enhanced():
 
         scheme_query = Scheme.query
 
-        # CATEGORY filter (OR-based)
+        # CATEGORY filter
         if combined_categories:
             scheme_query = scheme_query.filter(
                 or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
 
-        # Apply filters (gender, city, income etc.)
+        # Filter with NULL fallback
         if gender:
             scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
         if residence_type:
@@ -958,13 +959,13 @@ def search_schemes_enhanced():
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # If query_text is present, apply semantic search
+        # NLP similarity if query is provided
         if query_text:
             results = search_schemes_nlp(query_text, schemes)
         else:
             results = []
 
-        # If NLP gave nothing, fallback to plain filtered schemes
+        # Fallback if NLP match fails
         if not results:
             for scheme in schemes:
                 total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
