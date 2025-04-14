@@ -870,6 +870,10 @@ def get_top_rated_schemes():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
+def match_scheme_name(query_text, scheme_name):
+    """Use fuzzy matching to find the best match for scheme names"""
+    return fuzz.partial_ratio(query_text.lower(), scheme_name.lower()) >= 80
+
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
     try:
@@ -963,7 +967,7 @@ def search_schemes_enhanced():
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # Direct name-based matching
+        # Direct name-based matching (Fuzzy Matching)
         if query_text:
             results = [
                 {
@@ -971,13 +975,13 @@ def search_schemes_enhanced():
                     "scheme_name": scheme.scheme_name,
                     "category": scheme.category,
                     "description": scheme.description,
-                    "similarity": 1.0 if query_text.lower() in scheme.scheme_name.lower() else 0.0,
+                    "similarity": 1.0 if match_scheme_name(query_text, scheme.scheme_name) else 0.0,
                     "keywords": extract_keywords(scheme.description, 3),
                     "average_rating": round(scheme.average_rating or 0.0, 2),
                     "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
                 }
                 for scheme in schemes
-                if query_text.lower() in scheme.scheme_name.lower()  # Direct match for scheme name
+                if match_scheme_name(query_text, scheme.scheme_name)  # Fuzzy matching for scheme name
             ]
 
         # If no results from direct name match, fallback to NLP
