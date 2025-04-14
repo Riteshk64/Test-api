@@ -868,7 +868,7 @@ def search_schemes_enhanced():
     try:
         query_text = request.args.get('q', '').strip()
         if not query_text:
-            return jsonify({"error": "Search query cannot be empty"}), 400
+            return jsonify(get_default_scheme_list()), 200
 
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
