@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import re
 from sqlalchemy.sql import func
+from fuzzywuzzy import fuzz
 
 from .extensions import db
 from .models import User, Scheme, UserBookmark, SchemeRating
@@ -868,12 +869,6 @@ def get_top_rated_schemes():
         }), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-from flask import Blueprint, request, jsonify
-from sqlalchemy import or_
-from fuzzywuzzy import fuzz
-from .models import Scheme, SchemeRating
-from .utils import detect_categories_from_query, detect_filters_from_query, search_schemes_nlp, extract_keywords
 
 api = Blueprint('api', __name__)
 
