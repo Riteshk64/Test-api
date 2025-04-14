@@ -868,7 +868,41 @@ def search_schemes_enhanced():
     try:
         query_text = request.args.get('q', '').strip()
         if not query_text:
-            return jsonify(get_default_scheme_list()), 200
+            page = request.args.get('page', 1, type=int)
+            per_page = request.args.get('per_page', 10, type=int)
+            
+            scheme_query = Scheme.query.order_by(Scheme.scheme_name)
+            pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
+            schemes = pagination.items
+
+            result = []
+            for scheme in schemes:
+                total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+                result.append({
+                    "id": scheme.id,
+                    "scheme_name": scheme.scheme_name,
+                    "category": scheme.category,
+                    "description": scheme.description,
+                    "keywords": extract_keywords(scheme.description, 3),
+                    "average_rating": round(scheme.average_rating or 0.0, 2),
+                    "total_ratings": total_ratings
+                })
+
+            return jsonify({
+                "query": "",
+                "detected_categories": [],
+                "detected_filters": {},
+                "applied_filters": {},
+                "schemes": result,
+                "pagination": {
+                    "page": pagination.page,
+                    "per_page": pagination.per_page,
+                    "total_items": pagination.total,
+                    "total_pages": pagination.pages,
+                    "has_next": pagination.has_next,
+                    "has_prev": pagination.has_prev
+                }
+            }), 200
 
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
