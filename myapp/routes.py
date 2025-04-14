@@ -889,33 +889,18 @@ def search_schemes_enhanced():
         income = request.args.get('income', type=float)
         age = request.args.get('age', type=int)
         differently_abled = request.args.get('differently_abled')
-        if differently_abled is not None:
-            differently_abled = differently_abled.lower() == 'true'
         minority = request.args.get('minority')
-        if minority is not None:
-            minority = minority.lower() == 'true'
         bpl_category = request.args.get('bpl_category')
-        if bpl_category is not None:
-            bpl_category = bpl_category.lower() == 'true'
 
         # Categories + NLP synonym mapping
-        categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing',
-                      'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension',
+        categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing', 
+                      'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension', 
                       'Business', 'Loan']
 
         synonyms = {
-            "medical": "Health", "hospital": "Health", "doctor": "Health",
-            "crop": "Agriculture", "farmer": "Agriculture", "farming": "Agriculture",
-            "home": "Housing", "residence": "Housing", "rent": "Housing",
-            "financial": "Financial Assistance", "money": "Financial Assistance",
-            "loan": "Loan",
-            "student": "Education", "college": "Education", "school": "Education", "teacher": "Education",
-            "pensioner": "Pension", "retired": "Pension",
-            "business": "Business", "startup": "Business",
-            "insurance": "Insurance", "premium": "Insurance",
-            "job": "Employment", "employment": "Employment", "unemployed": "Employment",
-            "protection": "Safety", "violence": "Safety",
-            "assistance": "Financial Assistance", "grant": "Subsidy", "subsidy": "Subsidy"
+            "medical": "Health", "hospital": "Health", "crop": "Agriculture", "home": "Housing",
+            "financial": "Financial Assistance", "loan": "Loan", "student": "Education", 
+            "insurance": "Insurance", "job": "Employment", "business": "Business"
         }
 
         matched_categories = detect_categories_from_query(query_text, categories, synonyms) if query_text else []
@@ -925,49 +910,34 @@ def search_schemes_enhanced():
         manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
         combined_categories = list(set(matched_categories + manual_categories))
 
-        # NLP fallback values if manual not provided
-        residence_type = residence_type or filters_from_query.get('residence_type')
-        gender = gender or filters_from_query.get('gender')
-        city = city or filters_from_query.get('city')
-        income = income if income is not None else filters_from_query.get('income')
-        age = age if age is not None else filters_from_query.get('age')
+        # Initialize query for Scheme
+        query = Scheme.query
 
-        scheme_query = Scheme.query
-
-        # CATEGORY filter
+        # Apply filters from query (category, gender, residence_type, etc.)
         if combined_categories:
-            scheme_query = scheme_query.filter(
-                or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
-            )
-
-        # Filter with NULL fallback
+            query = query.filter(or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories]))
         if gender:
-            scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
+            query = query.filter(Scheme.gender == gender)
         if residence_type:
-            scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
+            query = query.filter(Scheme.residence_type == residence_type)
         if city:
-            scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
+            query = query.filter(Scheme.city == city)
         if income is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
+            query = query.filter(Scheme.income <= income)
         if differently_abled is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
+            query = query.filter(Scheme.differently_abled == differently_abled)
         if minority is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.minority == minority, Scheme.minority == None))
+            query = query.filter(Scheme.minority == minority)
         if bpl_category is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.bpl_category == bpl_category, Scheme.bpl_category == None))
-
-        # Age filter post-query
+            query = query.filter(Scheme.bpl_category == bpl_category)
         if age is not None:
-            filtered = scheme_query.all()
-            matching_ids = [s.id for s in filtered if scheme_matches_age(age, s.age_range)]
-            scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
+            query = query.filter(Scheme.age_range == age)  # Modify as needed
 
-        # Paginate
-        scheme_query = scheme_query.order_by(Scheme.scheme_name)
-        pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
+        # Pagination
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # Direct name-based matching (Fuzzy Matching)
+        # Fuzzy name-based matching
         if query_text:
             results = [
                 {
@@ -975,47 +945,27 @@ def search_schemes_enhanced():
                     "scheme_name": scheme.scheme_name,
                     "category": scheme.category,
                     "description": scheme.description,
-                    "similarity": 1.0 if match_scheme_name(query_text, scheme.scheme_name) else 0.0,
-                    "keywords": extract_keywords(scheme.description, 3),
-                    "average_rating": round(scheme.average_rating or 0.0, 2),
-                    "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
+                    "similarity": 1.0 if match_scheme_name(query_text, scheme.scheme_name) else 0.0
                 }
-                for scheme in schemes
-                if match_scheme_name(query_text, scheme.scheme_name)  # Fuzzy matching for scheme name
+                for scheme in schemes if match_scheme_name(query_text, scheme.scheme_name)
             ]
-
-        # If no results from direct name match, fallback to NLP
         if not results and query_text:
             results = search_schemes_nlp(query_text, schemes)
 
         return jsonify({
-            "query": query_text,
-            "detected_categories": matched_categories,
-            "detected_filters": filters_from_query,
-            "applied_filters": {
-                "category": combined_categories,
-                "residence_type": residence_type,
-                "gender": gender,
-                "city": city,
-                "income": income,
-                "age": age,
-                "differently_abled": differently_abled,
-                "minority": minority,
-                "bpl_category": bpl_category
-            },
             "schemes": results,
             "pagination": {
                 "page": pagination.page,
                 "per_page": pagination.per_page,
                 "total_items": pagination.total,
-                "total_pages": pagination.pages,
-                "has_next": pagination.has_next,
-                "has_prev": pagination.has_prev
+                "total_pages": pagination.pages
             }
         }), 200
 
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+
 # --------------------- Ratings Routes ---------------------
 
 @api.route('/schemes/<int:scheme_id>/rate', methods=['POST'])
