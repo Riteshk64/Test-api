@@ -968,16 +968,22 @@ def search_schemes_enhanced():
         else:
             results = []
 
-        # Fallback if NLP match fails
+        # Fallback if NLP match fails: include name-based matching
         if not results:
             for scheme in schemes:
                 total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+                
+                # Check if the name contains the query text
+                name_similarity = 0.0
+                if query_text.lower() in scheme.scheme_name.lower():
+                    name_similarity = 1.0  # Exact match will give max score
+
                 results.append({
                     "id": scheme.id,
                     "scheme_name": scheme.scheme_name,
                     "category": scheme.category,
                     "description": scheme.description,
-                    "similarity": 0.0,
+                    "similarity": name_similarity,
                     "keywords": extract_keywords(scheme.description, 3),
                     "average_rating": round(scheme.average_rating or 0.0, 2),
                     "total_ratings": total_ratings,
