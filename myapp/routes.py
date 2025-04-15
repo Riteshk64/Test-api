@@ -963,11 +963,12 @@ def search_schemes_enhanced():
             matching_ids = [s.id for s in filtered if scheme_matches_age(age, s.age_range)]
             scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
 
-        # Get all filtered schemes
-        filtered_schemes = scheme_query.all()
-        
-        # If NLP search is enabled and there's a query, use semantic search
+        # Only use NLP search if there's a non-empty query and NLP is enabled
         if use_nlp and query_text:
+            # Get all filtered schemes
+            filtered_schemes = scheme_query.all()
+            
+            # Use semantic search on the filtered schemes
             nlp_results = search_schemes_nlp(query_text, filtered_schemes)
             
             # If we have NLP results, use them directly
@@ -1009,7 +1010,7 @@ def search_schemes_enhanced():
                     }
                 }), 200
         
-        # Otherwise, fall back to standard pagination for filtered results
+        # For empty query or non-NLP search, use standard database pagination
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
@@ -1055,20 +1056,6 @@ def search_schemes_enhanced():
 
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-    detected = set()
-    query_lower = query.lower()
-
-    for word, category in synonyms.items():
-        if word in query_lower and category in categories:
-            detected.add(category)
-
-    # Match exact category names if used directly (case-insensitive)
-    for category in categories:
-        if category.lower() in query_lower:  # Convert category to lowercase for comparison
-            detected.add(category)
-
-    return list(detected)
 # --------------------- Ratings Routes ---------------------
 
 @api.route('/schemes/<int:scheme_id>/rate', methods=['POST'])
