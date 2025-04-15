@@ -427,17 +427,18 @@ def delete_user(firebase_id):
         user = User.query.filter_by(firebase_id=firebase_id).first()
         if not user:
             return jsonify({"error": f"User with firebase_id {firebase_id} not found"}), 404
-        
-        # Delete related records first (bookmarks)
+
+        # Delete related bookmarks and ratings first
         UserBookmark.query.filter_by(user_id=user.id).delete()
-        
+        SchemeRating.query.filter_by(user_id=user.id).delete()
+
         db.session.delete(user)
         try:
             db.session.commit()
         except Exception as e:
             db.session.rollback()
             return jsonify({"error": f"Database error: {str(e)}"}), 500
-        
+
         return jsonify({"message": "User deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
