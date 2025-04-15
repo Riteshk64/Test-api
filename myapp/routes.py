@@ -771,109 +771,6 @@ def get_scheme(scheme_id):
 
 # --------------------- Recommendation Routes ---------------------
 
-@api.route('/recommendations', methods=['GET'])
-def get_top_rated_schemes():
-    try:
-        top_schemes = Scheme.query.order_by(Scheme.average_rating.desc().nullslast()).limit(5).all()
-
-        result = []
-        for scheme in top_schemes:
-            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
-            result.append({
-                "id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "average_rating": scheme.average_rating or 0.0,
-                "total_ratings": total_ratings,
-                "department": scheme.department,
-                "benefit_type": scheme.benefit_type
-            })
-
-        return jsonify({"top_rated_schemes": result}), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-    try:
-        # Parse and validate pagination parameters
-        pagination_schema = PaginationParamsSchema()
-        try:
-            pagination_params = pagination_schema.load(request.args, unknown='exclude')
-        except ValidationError as err:
-            return handle_validation_error(err)
-            
-        page = pagination_params['page']
-        per_page = pagination_params['per_page']
-            
-        firebase_id = request.args.get('firebase_id')
-        user = User.query.filter_by(firebase_id=firebase_id).first()
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-            
-        # Query schemes based on user profile
-        query = Scheme.query
-        
-        # Filter schemes based on user preferences
-        if user.gender:
-            query = query.filter(or_(Scheme.gender == user.gender, Scheme.gender == None))
-        
-        if user.residence_type:
-            query = query.filter(or_(Scheme.residence_type == user.residence_type, Scheme.residence_type == None))
-        
-        if user.city:
-            query = query.filter(or_(Scheme.city == user.city, Scheme.city == None))
-        
-        if user.income is not None:
-            query = query.filter(or_(Scheme.income >= user.income, Scheme.income == None))
-        
-        if user.differently_abled is not None:
-            query = query.filter(or_(Scheme.differently_abled == user.differently_abled, Scheme.differently_abled == None))
-        
-        if user.minority is not None:
-            query = query.filter(or_(Scheme.minority == user.minority, Scheme.minority == None))
-        
-        if user.bpl_category is not None:
-            query = query.filter(or_(Scheme.bpl_category == user.bpl_category, Scheme.bpl_category == None))
-        
-        # Order by relevance (you can implement more sophisticated ordering)
-        query = query.order_by(Scheme.scheme_name)
-        
-        # Paginate results
-        pagination_result = paginate_results(query, page, per_page)
-        schemes = pagination_result['items']
-        
-        # Format response
-        result = []
-        for scheme in schemes:
-            # Calculate match score and similarity
-            match_score = calculate_match_score(user, scheme)
-            
-            result.append({
-                "id": scheme.id,
-                "scheme_name": scheme.scheme_name,
-                "category": scheme.category,
-                "description": scheme.description,
-                "match_score": match_score,
-                "benefit_type": scheme.benefit_type,
-                "department": scheme.department
-            })
-        
-        # Sort result by match score
-        result.sort(key=lambda x: {"High": 3, "Medium": 2, "Low": 1}[x['match_score']], reverse=True)
-        
-        # Return paginated response
-        return jsonify({
-            "recommendations": result,
-            "pagination": pagination_result['pagination']
-        }), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-def match_scheme_name(query_text, scheme_name):
-    """Use fuzzy matching to find the best match for scheme names"""
-    return fuzz.partial_ratio(query_text.lower(), scheme_name.lower()) >= 80
-
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
     try:
@@ -910,9 +807,14 @@ def search_schemes_enhanced():
             # Add other synonyms here
         }
 
-        # Detect category from query text
-        matched_categories = detect_categories_from_query(query_text, categories, synonyms) if query_text else []
-        filters_from_query = detect_filters_from_query(query_text) if query_text else []
+        # Initialize empty lists/dicts to avoid the error
+        matched_categories = []
+        filters_from_query = {}
+
+        # Only process query if it's not empty
+        if query_text:
+            matched_categories = detect_categories_from_query(query_text, categories, synonyms)
+            filters_from_query = detect_filters_from_query(query_text)
 
         # Combine NLP detected categories with manual categories
         manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
@@ -923,6 +825,251 @@ def search_schemes_enhanced():
             combined_categories = []
 
         # Fallback to detected filters if manual filters aren't provided
+        # Use get() method only on dictionary objects, not lists
+        residence_type = residence_type or filters_from_query.get('residence_type')
+        gender = gender or filters_from_query.get('gender')
+        city = city or filters_from_query.get('city')
+        income = income if income is not None else filters_from_query.get('income')
+        age = age if age is not None else filters_from_query.get('age')
+        differently_abled = differently_abled or filters_from_query.get('differently_abled')
+        minority = minority or filters_from_query.get('minority')
+        bpl_category = bpl_category or filters_from_query.get('bpl_category')
+
+        # Start building the base query
+        scheme_query = Scheme.query
+
+        # Apply category filter if available
+        if combined_categories:
+            scheme_query = scheme_query.filter(
+                or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
+            )
+
+        # Apply other filters
+        if gender:
+            scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
+        if residence_type:
+            scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
+        if city:
+            scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
+        if income is not None:
+            scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
+        if differently_abled is not None:
+            scheme_query = scheme_query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
+        if minority is not None:
+            scheme_query = scheme_query.filter(or_(Scheme.minority == minority, Scheme.minority == None))
+        if bpl_category is not None:
+            scheme_query = scheme_query.filter(or_(Scheme.bpl_category == bpl_category, Scheme.bpl_category == None))
+
+        # Apply age filter
+        if age is not None:
+            filtered = scheme_query.all()
+            matching_ids = [s.id for s in filtered if scheme_matches_age(age, s.age_range)]
+            scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
+
+        # If there's a search query, first try direct name matching
+        if query_text:
+            # Try direct name matching first (more specific match)
+            name_query = scheme_query.filter(Scheme.scheme_name.ilike(f"%{query_text}%"))
+            name_matches = name_query.all()
+            
+            # If we have direct name matches, prioritize those
+            if name_matches:
+                # Format the name match results
+                results = [
+                    {
+                        "id": scheme.id,
+                        "scheme_name": scheme.scheme_name,
+                        "category": scheme.category,
+                        "description": scheme.description,
+                        "keywords": extract_keywords(scheme.description, 3),
+                        "average_rating": round(scheme.average_rating or 0.0, 2),
+                        "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
+                        "match_type": "name_match"
+                    }
+                    for scheme in name_matches
+                ]
+                
+                # Manual pagination for name matches
+                total_items = len(results)
+                total_pages = (total_items + per_page - 1) // per_page
+                start_idx = (page - 1) * per_page
+                end_idx = start_idx + per_page
+                paginated_results = results[start_idx:end_idx]
+                
+                return jsonify({
+                    "query": query_text,
+                    "detected_categories": matched_categories,
+                    "detected_filters": filters_from_query,
+                    "applied_filters": {
+                        "category": combined_categories,
+                        "residence_type": residence_type,
+                        "gender": gender,
+                        "city": city,
+                        "income": income,
+                        "age": age,
+                        "differently_abled": differently_abled,
+                        "minority": minority,
+                        "bpl_category": bpl_category
+                    },
+                    "schemes": paginated_results,
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total_items": total_items,
+                        "total_pages": total_pages,
+                        "has_next": page < total_pages,
+                        "has_prev": page > 1
+                    }
+                }), 200
+            
+            # If no direct name matches, try NLP search if enabled
+            elif use_nlp:
+                # Get all filtered schemes
+                filtered_schemes = scheme_query.all()
+                
+                # Use semantic search on the filtered schemes
+                nlp_results = search_schemes_nlp(query_text, filtered_schemes)
+                
+                if nlp_results:
+                    # Add match type to results
+                    for result in nlp_results:
+                        result["match_type"] = "semantic_match"
+                        
+                    # Paginate the results manually
+                    start_idx = (page - 1) * per_page
+                    end_idx = start_idx + per_page
+                    paginated_results = nlp_results[start_idx:end_idx]
+                    
+                    # Create pagination info manually
+                    total_items = len(nlp_results)
+                    total_pages = (total_items + per_page - 1) // per_page
+                    
+                    return jsonify({
+                        "query": query_text,
+                        "detected_categories": matched_categories,
+                        "detected_filters": filters_from_query,
+                        "applied_filters": {
+                            "category": combined_categories,
+                            "residence_type": residence_type,
+                            "gender": gender,
+                            "city": city,
+                            "income": income,
+                            "age": age,
+                            "differently_abled": differently_abled,
+                            "minority": minority,
+                            "bpl_category": bpl_category
+                        },
+                        "schemes": paginated_results,
+                        "pagination": {
+                            "page": page,
+                            "per_page": per_page,
+                            "total_items": total_items,
+                            "total_pages": total_pages,
+                            "has_next": page < total_pages,
+                            "has_prev": page > 1
+                        }
+                    }), 200
+        
+        # For empty query or if no matches found yet, use standard database pagination
+        pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
+        schemes = pagination.items
+
+        # Format the standard results
+        results = [
+            {
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "keywords": extract_keywords(scheme.description, 3),
+                "average_rating": round(scheme.average_rating or 0.0, 2),
+                "total_ratings": SchemeRating.query.filter_by(scheme_id=scheme.id).count(),
+                "match_type": "filter_match" if query_text else "all_schemes"
+            }
+            for scheme in schemes
+        ]
+
+        return jsonify({
+            "query": query_text,
+            "detected_categories": matched_categories,
+            "detected_filters": filters_from_query,
+            "applied_filters": {
+                "category": combined_categories,
+                "residence_type": residence_type,
+                "gender": gender,
+                "city": city,
+                "income": income,
+                "age": age,
+                "differently_abled": differently_abled,
+                "minority": minority,
+                "bpl_category": bpl_category
+            },
+            "schemes": results,
+            "pagination": {
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "total_items": pagination.total,
+                "total_pages": pagination.pages,
+                "has_next": pagination.has_next,
+                "has_prev": pagination.has_prev
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+    try:
+        query_text = request.args.get('q', '').strip()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        use_nlp = request.args.get('use_nlp', 'true').lower() == 'true'
+
+        # Manual filters
+        manual_category_raw = request.args.get('category')
+        residence_type = request.args.get('residence_type')
+        gender = request.args.get('gender')
+        city = request.args.get('city')
+        income = request.args.get('income', type=float)
+        age = request.args.get('age', type=int)
+        differently_abled = request.args.get('differently_abled')
+        minority = request.args.get('minority')
+        bpl_category = request.args.get('bpl_category')
+
+        # Categories + NLP synonym mapping
+        categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing',
+                      'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension',
+                      'Business', 'Loan']
+
+        synonyms = {
+            "money": "Financial Assistance", 
+            "financial": "Financial Assistance", 
+            "loan": "Loan", 
+            "grant": "Subsidy", 
+            "student": "Education", 
+            "employment": "Employment", 
+            "health": "Health",
+            "business": "Business",  # Add business as synonym
+            # Add other synonyms here
+        }
+
+        # Initialize empty lists/dicts to avoid the error
+        matched_categories = []
+        filters_from_query = {}
+
+        # Only process query if it's not empty
+        if query_text:
+            matched_categories = detect_categories_from_query(query_text, categories, synonyms)
+            filters_from_query = detect_filters_from_query(query_text)
+
+        # Combine NLP detected categories with manual categories
+        manual_categories = [cat.strip() for cat in manual_category_raw.split(',')] if manual_category_raw else []
+        combined_categories = list(set(matched_categories + manual_categories))
+
+        # If no category is detected, apply the filter as empty.
+        if not combined_categories:
+            combined_categories = []
+
+        # Fallback to detected filters if manual filters aren't provided
+        # Use get() method only on dictionary objects, not lists
         residence_type = residence_type or filters_from_query.get('residence_type')
         gender = gender or filters_from_query.get('gender')
         city = city or filters_from_query.get('city')
