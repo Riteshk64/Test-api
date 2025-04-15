@@ -172,9 +172,9 @@ def detect_categories_from_query(query, categories, synonyms):
         if word in query_lower and category in categories:
             detected.add(category)
 
-    # Optional: Match exact category names if used directly
+    # Match exact category names if used directly (case-insensitive)
     for category in categories:
-        if category in query_lower:
+        if category.lower() in query_lower:  # Convert category to lowercase for comparison
             detected.add(category)
 
     return list(detected)
@@ -880,6 +880,7 @@ def search_schemes_enhanced():
         query_text = request.args.get('q', '').strip()
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
+        use_nlp = request.args.get('use_nlp', 'true').lower() == 'true'
 
         # Manual filters
         manual_category_raw = request.args.get('category')
@@ -904,7 +905,8 @@ def search_schemes_enhanced():
             "grant": "Subsidy", 
             "student": "Education", 
             "employment": "Employment", 
-            "health": "Health", 
+            "health": "Health",
+            "business": "Business",  # Add business as synonym
             # Add other synonyms here
         }
 
@@ -961,11 +963,57 @@ def search_schemes_enhanced():
             matching_ids = [s.id for s in filtered if scheme_matches_age(age, s.age_range)]
             scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
 
-        # Paginate results
+        # Get all filtered schemes
+        filtered_schemes = scheme_query.all()
+        
+        # If NLP search is enabled and there's a query, use semantic search
+        if use_nlp and query_text:
+            nlp_results = search_schemes_nlp(query_text, filtered_schemes)
+            
+            # If we have NLP results, use them directly
+            if nlp_results:
+                # Extract just the IDs for pagination
+                scheme_ids = [r['id'] for r in nlp_results]
+                # Paginate the results manually
+                start_idx = (page - 1) * per_page
+                end_idx = start_idx + per_page
+                paginated_results = nlp_results[start_idx:end_idx]
+                
+                # Create pagination info manually
+                total_items = len(nlp_results)
+                total_pages = (total_items + per_page - 1) // per_page  # Ceiling division
+                
+                return jsonify({
+                    "query": query_text,
+                    "detected_categories": matched_categories,
+                    "detected_filters": filters_from_query,
+                    "applied_filters": {
+                        "category": combined_categories,
+                        "residence_type": residence_type,
+                        "gender": gender,
+                        "city": city,
+                        "income": income,
+                        "age": age,
+                        "differently_abled": differently_abled,
+                        "minority": minority,
+                        "bpl_category": bpl_category
+                    },
+                    "schemes": paginated_results,
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total_items": total_items,
+                        "total_pages": total_pages,
+                        "has_next": page < total_pages,
+                        "has_prev": page > 1
+                    }
+                }), 200
+        
+        # Otherwise, fall back to standard pagination for filtered results
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
-        # If the query is empty, return all schemes with applied filters
+        # Format the standard results
         results = [
             {
                 "id": scheme.id,
@@ -1008,6 +1056,19 @@ def search_schemes_enhanced():
     except Exception as e:
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
+    detected = set()
+    query_lower = query.lower()
+
+    for word, category in synonyms.items():
+        if word in query_lower and category in categories:
+            detected.add(category)
+
+    # Match exact category names if used directly (case-insensitive)
+    for category in categories:
+        if category.lower() in query_lower:  # Convert category to lowercase for comparison
+            detected.add(category)
+
+    return list(detected)
 # --------------------- Ratings Routes ---------------------
 
 @api.route('/schemes/<int:scheme_id>/rate', methods=['POST'])
