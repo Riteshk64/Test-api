@@ -770,6 +770,105 @@ def get_scheme(scheme_id):
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 # --------------------- Recommendation Routes ---------------------
+@api.route('/recommendations', methods=['GET'])
+def get_top_rated_schemes():
+    try:
+        top_schemes = Scheme.query.order_by(Scheme.average_rating.desc().nullslast()).limit(5).all()
+
+        result = []
+        for scheme in top_schemes:
+            total_ratings = SchemeRating.query.filter_by(scheme_id=scheme.id).count()
+            result.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "average_rating": scheme.average_rating or 0.0,
+                "total_ratings": total_ratings,
+                "department": scheme.department,
+                "benefit_type": scheme.benefit_type
+            })
+
+        return jsonify({"top_rated_schemes": result}), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+    try:
+        # Parse and validate pagination parameters
+        pagination_schema = PaginationParamsSchema()
+        try:
+            pagination_params = pagination_schema.load(request.args, unknown='exclude')
+        except ValidationError as err:
+            return handle_validation_error(err)
+            
+        page = pagination_params['page']
+        per_page = pagination_params['per_page']
+            
+        firebase_id = request.args.get('firebase_id')
+        user = User.query.filter_by(firebase_id=firebase_id).first()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        # Query schemes based on user profile
+        query = Scheme.query
+        
+        # Filter schemes based on user preferences
+        if user.gender:
+            query = query.filter(or_(Scheme.gender == user.gender, Scheme.gender == None))
+        
+        if user.residence_type:
+            query = query.filter(or_(Scheme.residence_type == user.residence_type, Scheme.residence_type == None))
+        
+        if user.city:
+            query = query.filter(or_(Scheme.city == user.city, Scheme.city == None))
+        
+        if user.income is not None:
+            query = query.filter(or_(Scheme.income >= user.income, Scheme.income == None))
+        
+        if user.differently_abled is not None:
+            query = query.filter(or_(Scheme.differently_abled == user.differently_abled, Scheme.differently_abled == None))
+        
+        if user.minority is not None:
+            query = query.filter(or_(Scheme.minority == user.minority, Scheme.minority == None))
+        
+        if user.bpl_category is not None:
+            query = query.filter(or_(Scheme.bpl_category == user.bpl_category, Scheme.bpl_category == None))
+        
+        # Order by relevance (you can implement more sophisticated ordering)
+        query = query.order_by(Scheme.scheme_name)
+        
+        # Paginate results
+        pagination_result = paginate_results(query, page, per_page)
+        schemes = pagination_result['items']
+        
+        # Format response
+        result = []
+        for scheme in schemes:
+            # Calculate match score and similarity
+            match_score = calculate_match_score(user, scheme)
+            
+            result.append({
+                "id": scheme.id,
+                "scheme_name": scheme.scheme_name,
+                "category": scheme.category,
+                "description": scheme.description,
+                "match_score": match_score,
+                "benefit_type": scheme.benefit_type,
+                "department": scheme.department
+            })
+        
+        # Sort result by match score
+        result.sort(key=lambda x: {"High": 3, "Medium": 2, "Low": 1}[x['match_score']], reverse=True)
+        
+        # Return paginated response
+        return jsonify({
+            "recommendations": result,
+            "pagination": pagination_result['pagination']
+        }), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
 
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
