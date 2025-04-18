@@ -871,7 +871,6 @@ def get_top_rated_schemes():
 
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
-    from sqlalchemy import or_
 
     def apply_nullable_filter(query, column, value):
         if value is not None:
@@ -899,14 +898,107 @@ def search_schemes_enhanced():
                       'Business', 'Loan']
 
         synonyms = {
-            "money": "Financial Assistance", 
-            "financial": "Financial Assistance", 
-            "loan": "Loan", 
-            "grant": "Subsidy", 
-            "student": "Education", 
-            "employment": "Employment", 
+            # Financial Assistance
+            "money": "Financial Assistance",
+            "fund": "Financial Assistance",
+            "cash": "Financial Assistance",
+            "support": "Financial Assistance",
+            "relief": "Financial Assistance",
+            "financial help": "Financial Assistance",
+            "aid": "Financial Assistance",
+            "compensation": "Financial Assistance",
+
+            # Loan
+            "loan": "Loan",
+            "credit": "Loan",
+            "borrow": "Loan",
+            "interest-free": "Loan",
+            "microfinance": "Loan",
+
+            # Subsidy
+            "grant": "Subsidy",
+            "rebate": "Subsidy",
+            "discount": "Subsidy",
+            "price support": "Subsidy",
+            "subsidized": "Subsidy",
+
+            # Education
+            "student": "Education",
+            "scholarship": "Education",
+            "school": "Education",
+            "college": "Education",
+            "tuition": "Education",
+            "hostel": "Education",
+            "exam": "Education",
+            "merit": "Education",
+
+            # Employment
+            "job": "Employment",
+            "employment": "Employment",
+            "work": "Employment",
+            "apprenticeship": "Employment",
+            "skill": "Employment",
+            "training": "Employment",
+            "placement": "Employment",
+
+            # Business
+            "business": "Business",
+            "startup": "Business",
+            "entrepreneur": "Business",
+            "msme": "Business",
+            "industry": "Business",
+            "enterprise": "Business",
+
+            # Agriculture
+            "farming": "Agriculture",
+            "farmer": "Agriculture",
+            "crop": "Agriculture",
+            "seeds": "Agriculture",
+            "irrigation": "Agriculture",
+            "pesticide": "Agriculture",
+            "fertilizer": "Agriculture",
+            "dairy": "Agriculture",
+            "animal husbandry": "Agriculture",
+
+            # Health
             "health": "Health",
-            "business": "Business"
+            "hospital": "Health",
+            "treatment": "Health",
+            "insurance": "Insurance",
+            "surgery": "Health",
+            "doctor": "Health",
+            "wellness": "Health",
+            "medicine": "Health",
+            "checkup": "Health",
+
+            # Insurance
+            "insurance": "Insurance",
+            "life cover": "Insurance",
+            "medical cover": "Insurance",
+            "premium": "Insurance",
+            "accident cover": "Insurance",
+
+            # Housing
+            "house": "Housing",
+            "home": "Housing",
+            "shelter": "Housing",
+            "residence": "Housing",
+            "construction": "Housing",
+            "flat": "Housing",
+
+            # Safety
+            "protection": "Safety",
+            "safety": "Safety",
+            "crime": "Safety",
+            "legal help": "Safety",
+            "abuse": "Safety",
+
+            # Pension
+            "retirement": "Pension",
+            "pension": "Pension",
+            "old age": "Pension",
+            "elderly": "Pension",
+            "senior citizen": "Pension"
         }
 
         matched_categories = []
@@ -933,26 +1025,37 @@ def search_schemes_enhanced():
 
         scheme_query = Scheme.query
 
+        # Category filtering
         if combined_categories:
             scheme_query = scheme_query.filter(
                 or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
 
-        scheme_query = apply_nullable_filter(scheme_query, Scheme.gender, gender)
+        # Gender: exact or 'ALL'
+        if gender:
+            scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender.ilike("ALL")))
+
+        # City: exact or 'ALL'
+        if city:
+            scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city.ilike("ALL")))
+
+        # Residence type, disability, minority, BPL: exact or NULL
         scheme_query = apply_nullable_filter(scheme_query, Scheme.residence_type, residence_type)
-        scheme_query = apply_nullable_filter(scheme_query, Scheme.city, city)
         scheme_query = apply_nullable_filter(scheme_query, Scheme.differently_abled, differently_abled)
         scheme_query = apply_nullable_filter(scheme_query, Scheme.minority, minority)
         scheme_query = apply_nullable_filter(scheme_query, Scheme.bpl_category, bpl_category)
 
+        # Income: <= or NULL
         if income is not None:
             scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income.is_(None)))
 
+        # Age handling
         if age is not None:
             filtered = scheme_query.all()
             matching_ids = [s.id for s in filtered if scheme_matches_age(age, s.age_range)]
             scheme_query = Scheme.query.filter(Scheme.id.in_(matching_ids))
 
+        # Name-based match
         if query_text:
             name_query = scheme_query.filter(Scheme.scheme_name.ilike(f"%{query_text}%"))
             name_matches = name_query.all()
@@ -1045,6 +1148,7 @@ def search_schemes_enhanced():
                         }
                     }), 200
 
+        # Fallback default filtering (no name match, no NLP)
         pagination = scheme_query.paginate(page=page, per_page=per_page, error_out=False)
         schemes = pagination.items
 
