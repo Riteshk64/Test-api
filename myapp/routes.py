@@ -871,6 +871,13 @@ def get_top_rated_schemes():
 
 @api.route('/schemes/search/enhanced', methods=['GET'])
 def search_schemes_enhanced():
+    from sqlalchemy import or_
+
+    def apply_nullable_filter(query, column, value):
+        if value is not None:
+            return query.filter(or_(column == value, column.is_(None)))
+        return query
+
     try:
         query_text = request.args.get('q', '').strip()
         page = request.args.get('page', 1, type=int)
@@ -931,20 +938,15 @@ def search_schemes_enhanced():
                 or_(*[Scheme.category.ilike(f"%{cat}%") for cat in combined_categories])
             )
 
-        if gender:
-            scheme_query = scheme_query.filter(or_(Scheme.gender == gender, Scheme.gender == None))
-        if residence_type:
-            scheme_query = scheme_query.filter(or_(Scheme.residence_type == residence_type, Scheme.residence_type == None))
-        if city:
-            scheme_query = scheme_query.filter(or_(Scheme.city == city, Scheme.city == None))
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.gender, gender)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.residence_type, residence_type)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.city, city)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.differently_abled, differently_abled)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.minority, minority)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.bpl_category, bpl_category)
+
         if income is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income == None))
-        if differently_abled is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.differently_abled == differently_abled, Scheme.differently_abled == None))
-        if minority is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.minority == minority, Scheme.minority == None))
-        if bpl_category is not None:
-            scheme_query = scheme_query.filter(or_(Scheme.bpl_category == bpl_category, Scheme.bpl_category == None))
+            scheme_query = scheme_query.filter(or_(Scheme.income <= income, Scheme.income.is_(None)))
 
         if age is not None:
             filtered = scheme_query.all()
