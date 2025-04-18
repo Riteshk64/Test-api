@@ -37,7 +37,7 @@ class UserSchema(Schema):
     bpl_category = fields.Boolean(required=False, allow_none=True)
     income = fields.Float(required=False, allow_none=True, validate=validate.Range(min=0))
     education_level = fields.String(required=False, allow_none=True)
-    preferred_language = fields.String(required=False, missing='en')
+    preferred_language = fields.String(required=False, load_default='en')
 
 class BookmarkSchema(Schema):
     scheme_id = fields.Integer(required=True)
