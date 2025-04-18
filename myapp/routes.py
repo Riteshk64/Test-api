@@ -44,8 +44,8 @@ class BookmarkSchema(Schema):
     notes = fields.String(required=False, allow_none=True)
 
 class PaginationParamsSchema(Schema):
-    page = fields.Integer(required=False, missing=1, validate=validate.Range(min=1))
-    per_page = fields.Integer(required=False, missing=10, validate=validate.Range(min=1, max=100))
+    page = fields.Integer(required=False, load_default=1, validate=validate.Range(min=1))
+    per_page = fields.Integer(required=False, load_default=10, validate=validate.Range(min=1, max=100))
 
 # --------------------- Helper Functions ---------------------
 
