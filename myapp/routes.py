@@ -761,7 +761,9 @@ def get_scheme(scheme_id):
             "average_rating": round(scheme.average_rating or 0.0, 2),
             "total_ratings": total_ratings,
             "bookmark_id": bookmark_id,
-            "user_rating": user_rating
+            "user_rating": user_rating,
+            "process": scheme.process,
+            "documents": scheme.documents,
         }
         
         return jsonify(result), 200
