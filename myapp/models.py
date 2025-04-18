@@ -39,7 +39,6 @@ class Scheme(db.Model):
     city = db.Column(db.String(100), nullable=True)
     gender = db.Column(db.String(20), nullable=True)
     caste = db.Column(db.String(100), nullable=True)
-    benefit_type = db.Column(db.String(100), nullable=True)
     differently_abled = db.Column(db.Boolean, nullable=True)
     marital_status = db.Column(db.String(50), nullable=True)
     disability_percentage = db.Column(db.Float, nullable=True)
@@ -55,6 +54,8 @@ class Scheme(db.Model):
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
     embedding = db.Column(BYTEA, nullable=True)
     average_rating = db.Column(db.Float, nullable=False, default=0.0)
+    process = db.Column(db.Text, nullable=True)
+    documents = db.Column(db.Text, nullable=True)
     
     # Optional fields for multilingual support
     description_marathi = db.Column(db.Text, nullable=True)

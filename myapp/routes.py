@@ -692,7 +692,6 @@ def get_schemes():
                 "scheme_name": scheme.scheme_name,
                 "category": scheme.category,
                 "description": scheme.description,
-                "benefit_type": scheme.benefit_type,
                 "application_link": scheme.application_link,
                 "department": scheme.department,
                 "launch_date": scheme.launch_date.strftime('%Y-%m-%d') if scheme.launch_date else None,
@@ -748,7 +747,6 @@ def get_scheme(scheme_id):
             "city": scheme.city,
             "gender": scheme.gender,
             "caste": scheme.caste,
-            "benefit_type": scheme.benefit_type,
             "differently_abled": scheme.differently_abled,
             "marital_status": scheme.marital_status,
             "disability_percentage": scheme.disability_percentage,
@@ -787,7 +785,6 @@ def get_top_rated_schemes():
                 "average_rating": scheme.average_rating or 0.0,
                 "total_ratings": total_ratings,
                 "department": scheme.department,
-                "benefit_type": scheme.benefit_type
             })
 
         return jsonify({"top_rated_schemes": result}), 200
@@ -855,7 +852,6 @@ def get_top_rated_schemes():
                 "category": scheme.category,
                 "description": scheme.description,
                 "match_score": match_score,
-                "benefit_type": scheme.benefit_type,
                 "department": scheme.department
             })
         
