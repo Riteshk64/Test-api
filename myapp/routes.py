@@ -181,11 +181,17 @@ def detect_categories_from_query(query, categories, synonyms):
 
 def normalize_number_phrase(text):
     """
-    Convert number phrases like '3 lakhs', '50k', '2 crore' to a float value.
+    Convert number phrases like '3 lakhs', '₹50k', '2 crore' to a float value.
     """
-    text = text.lower().replace(',', '').strip()
+    if isinstance(text, (int, float)):
+        return float(text)
 
-    match = re.search(r'(\d+\.?\d*)\s*(lakh|lakhs|k|thousand|crore)', text)
+    if not text or not isinstance(text, str):
+        return None
+
+    text = text.lower().replace(',', '').replace('₹', '').strip()
+
+    match = re.search(r'(\d+\.?\d*)\s*(lakh|lakhs|k|thousand|crore)?', text)
     if match:
         num = float(match.group(1))
         unit = match.group(2)
@@ -196,6 +202,8 @@ def normalize_number_phrase(text):
             return num * 1000
         elif unit == 'crore':
             return num * 10000000
+        else:
+            return num  # No unit
 
     plain_num = re.search(r'\d{5,}', text)
     if plain_num:
@@ -234,11 +242,13 @@ def detect_filters_from_query(query_text):
 
     # --- Income Detection ---
     income_match = re.search(
-        r'(under|below|less than|upto|up to|above|income of|income is|income)\s+([^\s]+(?:\s*(?:lakh|lakhs|k|crore|thousand))?)',
+        r'(?:under|below|less than|upto|up to|above|income of|income is|income)?\s*(?:₹)?\s*(\d+\.?\d*)\s*(lakh|lakhs|k|crore|thousand)?',
         query_text.lower()
     )
     if income_match:
-        value = normalize_number_phrase(income_match.group(2))
+        num = income_match.group(1)
+        unit = income_match.group(2) or ""
+        value = normalize_number_phrase(f"{num} {unit}".strip())
         if value:
             filters['income'] = value
 
