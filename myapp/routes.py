@@ -883,8 +883,10 @@ def get_top_rated_schemes():
 def search_schemes_enhanced():
 
     def apply_nullable_filter(query, column, value):
-        if value is not None:
-            return query.filter(or_(column == value, column.is_(None)))
+        if value is True:
+            return query.filter(or_(column.is_(None), column.is_(True)))  # Only true + null
+        elif value is False:
+            return query.filter(or_(column.is_(None), column.is_(False)))  # Only false + null
         return query
 
     try:
@@ -902,6 +904,7 @@ def search_schemes_enhanced():
         differently_abled = request.args.get('differently_abled')
         minority = request.args.get('minority')
         bpl_category = request.args.get('bpl_category')
+        category = request.args.get('category')
 
         categories = ['Health', 'Insurance', 'Employment', 'Agriculture', 'Housing',
                       'Financial Assistance', 'Safety', 'Subsidy', 'Education', 'Pension',
@@ -1054,6 +1057,7 @@ def search_schemes_enhanced():
         scheme_query = apply_nullable_filter(scheme_query, Scheme.differently_abled, differently_abled)
         scheme_query = apply_nullable_filter(scheme_query, Scheme.minority, minority)
         scheme_query = apply_nullable_filter(scheme_query, Scheme.bpl_category, bpl_category)
+        scheme_query = apply_nullable_filter(scheme_query, Scheme.caste, category)
 
         # Income: <= or NULL
         if income is not None:
@@ -1105,7 +1109,8 @@ def search_schemes_enhanced():
                         "age": age,
                         "differently_abled": differently_abled,
                         "minority": minority,
-                        "bpl_category": bpl_category
+                        "bpl_category": bpl_category,
+                        "category": category,
                     },
                     "schemes": paginated_results,
                     "pagination": {
@@ -1145,7 +1150,8 @@ def search_schemes_enhanced():
                             "age": age,
                             "differently_abled": differently_abled,
                             "minority": minority,
-                            "bpl_category": bpl_category
+                            "bpl_category": bpl_category,
+                            "category": category,
                         },
                         "schemes": paginated_results,
                         "pagination": {
@@ -1191,7 +1197,8 @@ def search_schemes_enhanced():
                 "age": age,
                 "differently_abled": differently_abled,
                 "minority": minority,
-                "bpl_category": bpl_category
+                "bpl_category": bpl_category,
+                "category": category,
             },
             "schemes": results,
             "pagination": {
